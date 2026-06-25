@@ -12,6 +12,10 @@ pip install -r requirements.txt
 ./setup.sh
 ```
 
+`setup.sh` downloads demo clips and three YOLO weights into `data/`, including
+`football-ball-detection.pt` (required for pass analytics). Model weights and
+rendered MP4s are gitignored — run `./setup.sh` locally rather than committing them.
+
 ## ⚽ datasets
 
 Original data comes from the [DFL - Bundesliga Data Shootout](https://www.kaggle.com/competitions/dfl-bundesliga-data-shootout) 
@@ -112,9 +116,11 @@ on the field.
 
 ### player-motion analytics
 
-Four additional modes overlay player speed, direction, distance, and spotlight
-tracking on the broadcast view. They share one tracking pass per run and reuse
-the same detectors as the modes above (YOLO by default).
+Seven analytics modes overlay player speed, direction, distance, spotlight
+tracking, and pass visualization on the broadcast view. They share one tracking
+pass per run and reuse the same detectors as the modes above (YOLO by default).
+Pass modes additionally require the ball detection model from `setup.sh`
+(`data/football-ball-detection.pt`).
 
 - `DIRECTION` — Team-colored ground ellipses with a velocity joystick dot on each
   player (centroid-based; no pitch homography).
@@ -152,9 +158,31 @@ the same detectors as the modes above (YOLO by default).
   --device mps --mode SPEED_AND_DISTANCE --track-id 7
   ```
 
-- `ALL` — Run-all orchestrator: computes shared tracking, homography, and
-  kinematics once, then writes all five analytics renders (direction, speed,
-  distance, speed-and-distance for all players, and a single-player spotlight).
+- `PASS_NETWORK` — Detects completed passes and renders a collaboration web plus
+  pass highlights on the broadcast view. Use `--show-predictions` to freeze on
+  high-quality pass moments and reveal top pass options; tune sensitivity with
+  `--freeze-quality-threshold`.
+
+  ```bash
+  python main.py --source_video_path data/08fd33_0.mp4 \
+  --target_video_path data/renders/08fd33_0-pass-network.mp4 \
+  --device mps --mode PASS_NETWORK \
+  --show-predictions --freeze-quality-threshold 0.5
+  ```
+
+- `PASS_ALTERNATIVES` — Freeze-moment pass planning: slows the clip at each
+  possession change and animates ranked pass options from the carrier.
+
+  ```bash
+  python main.py --source_video_path data/08fd33_0.mp4 \
+  --target_video_path data/renders/08fd33_0-pass-alternatives.mp4 \
+  --device mps --mode PASS_ALTERNATIVES
+  ```
+
+- `ALL` — Run-all orchestrator: computes shared tracking, homography, kinematics,
+  and pass scan once, then writes **seven** analytics renders (direction, speed,
+  distance, speed-and-distance for all players, a single-player spotlight,
+  pass-network, and pass-alternatives).
 
   ```bash
   python main.py --source_video_path data/2e57b9_0.mp4 \
@@ -164,8 +192,9 @@ the same detectors as the modes above (YOLO by default).
 
 #### analytics CLI flags
 
-These flags apply to `DIRECTION`, `SPEED`, `DISTANCE`, `SPEED_AND_DISTANCE`, and
-`ALL` (ignored by the original six modes):
+These flags apply to `DIRECTION`, `SPEED`, `DISTANCE`, `SPEED_AND_DISTANCE`,
+`PASS_NETWORK`, `PASS_ALTERNATIVES`, and `ALL` (ignored by the original six
+modes):
 
 | flag | default | purpose |
 |:-----|:--------|:--------|
@@ -174,6 +203,8 @@ These flags apply to `DIRECTION`, `SPEED`, `DISTANCE`, `SPEED_AND_DISTANCE`, and
 | `--pitch-detector` | `yolo` | Pitch keypoints: `yolo` or `inference` (Roboflow) |
 | `--track-id` | *(none)* | `SPEED_AND_DISTANCE` / `ALL`: spotlight this tracker id |
 | `--show-track-ids` | off | `SPEED`: show tracker ID chips on players (with speed badges) |
+| `--show-predictions` | off | `PASS_NETWORK`: freeze and reveal top pass alternatives at pass moments |
+| `--freeze-quality-threshold` | `0.0` | `PASS_NETWORK`: min pass quality score for prediction freeze |
 | `--player-model-path` | *(bundled YOLO)* | Override YOLO player `.pt` path |
 | `--pitch-model-path` | *(bundled YOLO)* | Override YOLO pitch `.pt` path |
 | `--player-model-id` | Roboflow id | Inference player model id |
@@ -190,7 +221,11 @@ Inference backends.
 
 - **Team colors** — Team assignment uses UMAP + clustering (`TeamClassifier`)
   without a fixed random seed, so jersey colors may swap between runs even when
-  tracking ids stay stable.
+  tracking ids stay stable. UMAP is forced to `n_jobs=1` in `sports/common/team.py`
+  to avoid multiprocessing crashes on some platforms.
+- **Numba / UMAP crashes** — If team classification or trackers fail with Numba
+  JIT errors, run with `NUMBA_DISABLE_JIT=1` (e.g.
+  `NUMBA_DISABLE_JIT=1 python main.py ...`).
 
 ## 🗺️ roadmap
 

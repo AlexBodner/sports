@@ -508,6 +508,45 @@ def kalman_ground_speed_m_s(
     return float(np.linalg.norm(delta_m)) * float(fps)
 
 
+def carrier_kalman_direction(
+    detections: sv.Detections,
+    carrier_index: int,
+    *,
+    transformer=None,
+    min_speed: float = 0.5,
+) -> np.ndarray | None:
+    """Unit movement direction for the ball carrier from Kalman velocity."""
+    from analytics.geometry import unit
+    from analytics.possession import feet_xy
+
+    if detections.data is None:
+        return None
+    kf_vx = detections.data.get("kf_vx")
+    kf_vy = detections.data.get("kf_vy")
+    if kf_vx is None or kf_vy is None:
+        return None
+    vx, vy = float(kf_vx[carrier_index]), float(kf_vy[carrier_index])
+    if not np.isfinite(vx) or not np.isfinite(vy):
+        return None
+    speed = float(np.hypot(vx, vy))
+    if speed < min_speed:
+        return None
+    vel_img = np.array([vx, vy], dtype=np.float64)
+    if transformer is None:
+        return unit(vel_img)
+    from analytics.homography import image_to_pitch_m
+
+    feet = feet_xy(detections)[carrier_index]
+    p0 = image_to_pitch_m(feet.reshape(1, 2), transformer)
+    p1 = image_to_pitch_m((feet + vel_img).reshape(1, 2), transformer)
+    if p0 is None or p1 is None:
+        return unit(vel_img)
+    delta = p1[0] - p0[0]
+    if float(np.linalg.norm(delta)) < 1e-6:
+        return unit(vel_img)
+    return unit(delta)
+
+
 class KalmanSpeedDisplaySmoother:
     """EMA on displayed ground speed (m/s) per track."""
 
