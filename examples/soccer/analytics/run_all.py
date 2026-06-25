@@ -13,12 +13,12 @@ import time
 from pathlib import Path
 
 from analytics.clip_pipeline import ClipAnalysis, compute_clip_analysis
-from analytics.direction import run_direction
-from analytics.distance import run_distance
-from analytics.pass_alternatives import run_pass_alternatives
-from analytics.pass_network import run_pass_network
-from analytics.speed_and_distance import run_speed_and_distance
-from analytics.speed import run_speed
+from analytics.modes.direction import run_direction
+from analytics.modes.distance import run_distance
+from analytics.modes.pass_alternatives import run_pass_alternatives
+from analytics.modes.pass_network import run_pass_network
+from analytics.modes.speed_and_distance import run_speed_and_distance
+from analytics.modes.speed import run_speed
 
 # (output suffix, human label, dispatch key) for renders in run order.
 _RENDER_PLAN = (

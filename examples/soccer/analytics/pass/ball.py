@@ -10,9 +10,9 @@ import supervision as sv
 from ultralytics import YOLO
 
 from analytics.class_ids import ROLE_BALL
-from analytics.possession import feet_xy
+from analytics.pass.possession import feet_xy
 
-_SOCCER_DIR = Path(__file__).resolve().parent.parent
+_SOCCER_DIR = Path(__file__).resolve().parent.parent.parent
 BALL_MODEL_PATH = str(_SOCCER_DIR / "data" / "football-ball-detection.pt")
 
 

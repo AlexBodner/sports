@@ -24,13 +24,15 @@ from sports.common.team import TeamClassifier
 from sports.common.view import ViewTransformer
 from sports.configs.soccer import SoccerPitchConfiguration
 
-from analytics.direction import run_direction
-from analytics.distance import run_distance
-from analytics.speed_and_distance import run_speed_and_distance
-from analytics.run_all import run_all
-from analytics.speed import run_speed
-from analytics.pass_alternatives import run_pass_alternatives
-from analytics.pass_network import run_pass_network
+from analytics import (
+    run_all,
+    run_direction,
+    run_distance,
+    run_pass_alternatives,
+    run_pass_network,
+    run_speed,
+    run_speed_and_distance,
+)
 
 from analytics.class_ids import (
     BALL_CLASS_ID,

@@ -45,9 +45,9 @@ from analytics.player_motion import (
     open_video,
     resolve_goalkeepers_team_id,
 )
-from analytics.ball import attach_ball, create_ball_detector
-from analytics.possession import ball_xy
-from analytics.passes import (
+from analytics.pass.ball import attach_ball, create_ball_detector
+from analytics.pass.possession import ball_xy
+from analytics.pass.passes import (
     PassDetectionConfig,
     PassQualityScorer,
     PossessionScanResult,
@@ -301,8 +301,8 @@ class ClipAnalysis:
     def pass_alternative_events(self) -> list[Any]:
         """Cinematic freeze-moment pass options (PASS_ALTERNATIVES planning)."""
         if self._pass_alternative_events is None:
-            from analytics.pass_alternatives import plan_pass_events
-            from analytics.pass_options import PassWeights
+            from analytics.modes.pass_alternatives import plan_pass_events
+            from analytics.pass.pass_options import PassWeights
 
             metric = self.metric
             self._pass_alternative_events = plan_pass_events(

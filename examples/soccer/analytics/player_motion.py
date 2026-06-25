@@ -517,7 +517,7 @@ def carrier_kalman_direction(
 ) -> np.ndarray | None:
     """Unit movement direction for the ball carrier from Kalman velocity."""
     from analytics.geometry import unit
-    from analytics.possession import feet_xy
+    from analytics.pass.possession import feet_xy
 
     if detections.data is None:
         return None

@@ -34,13 +34,13 @@ from analytics.geometry import (
     point_to_segment_distance,
     unit,
 )
-from analytics.possession import (
+from analytics.pass.possession import (
     Carrier,
     bbox_center_xy,
     feet_xy,
     player_mask,
 )
-from analytics.possession import (
+from analytics.pass.possession import (
     CONTROL_MAX_DISTANCE_M,
     CONTROL_MAX_DISTANCE_PX,
 )
