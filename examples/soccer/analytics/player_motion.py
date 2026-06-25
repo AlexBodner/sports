@@ -534,7 +534,7 @@ def carrier_kalman_direction(
     vel_img = np.array([vx, vy], dtype=np.float64)
     if transformer is None:
         return unit(vel_img)
-    from analytics.homography import image_to_pitch_m
+    from analytics.pass_imports import image_to_pitch_m
 
     feet = feet_xy(detections)[carrier_index]
     p0 = image_to_pitch_m(feet.reshape(1, 2), transformer)

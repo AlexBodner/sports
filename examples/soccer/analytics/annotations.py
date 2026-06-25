@@ -16,20 +16,20 @@ import cv2
 import numpy as np
 import supervision as sv
 
+from analytics.goalkeepers import image_to_pitch_cm
 from analytics.homography import (
     HOMOGRAPHY_RANSAC_REPROJ_THRESH,
     PITCH_CONFIG,
     ViewTransformer,
     draw_pitch,
     draw_points_on_pitch,
-    image_to_pitch_cm,
-    image_to_pitch_m,
     pitch_circle_to_image,
     pitch_cm_to_image,
     pitch_keypoint_accept_mask,
     pitch_keypoint_confidence,
-    render_radar_from_transformer,
+    render_radar,
 )
+from analytics.pass_imports import image_to_pitch_m, pitch_attack_direction
 from analytics.pass_imports import PassOption, ball_xy, feet_xy, player_mask
 from analytics.class_ids import ROLE_GOALKEEPER, ROLE_PLAYER
 
@@ -609,9 +609,7 @@ def draw_radar_minimap(
     if prebuilt_radar is not None:
         radar = prebuilt_radar
     elif keypoints is not None:
-        from analytics.homography import render_radar_simple
-
-        radar = render_radar_simple(
+        radar = render_radar(
             dets,
             keypoints,
             confidence=pitch_confidence,
@@ -619,10 +617,11 @@ def draw_radar_minimap(
             debug_keypoints=debug_keypoints,
         )
     elif transformer is not None:
-        from analytics.homography import render_radar_from_transformer
-
-        radar = render_radar_from_transformer(
-            dets, transformer, locked_goal_defenders=locked_goal_defenders
+        radar = render_radar(
+            dets,
+            None,
+            transformer=transformer,
+            locked_goal_defenders=locked_goal_defenders,
         )
     else:
         return frame
@@ -1337,7 +1336,6 @@ def _options_with_lane_debug(
     pitch_cm: np.ndarray | None = None,
 ) -> list[PassOption]:
     """Re-score if needed so freeze frames always carry pitch corridor geometry."""
-    from analytics.homography import pitch_attack_direction
     from analytics.pass_imports import PassWeights, bbox_center_xy, remap_lane_debug_to_pitch_cm, top_pass_options
 
     if event.options and all(o.lane_debug is not None for o in event.options):
@@ -1394,7 +1392,7 @@ def draw_pass_overlay(
     ``revealed_options``: how many top options to show (0 = carrier only, None = all).
     ``reveal_progress``: 0-1 animation within the current reveal phase.
     """
-    from analytics.homography import homography_from_keypoints_radar, render_radar_simple
+    from analytics.homography import homography_from_keypoints_radar
     from analytics.pass_imports import PassWeights, remap_lane_debug_to_pitch_cm
 
     if weights is None:
@@ -1506,7 +1504,7 @@ def draw_pass_overlay(
         radar_h = homography_from_keypoints_radar(
             keypoints, confidence=pitch_confidence
         )
-        radar = render_radar_simple(
+        radar = render_radar(
             dets,
             keypoints,
             confidence=pitch_confidence,

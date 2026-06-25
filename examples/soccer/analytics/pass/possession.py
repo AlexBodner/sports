@@ -119,7 +119,7 @@ def find_ball_carrier(
     dist_to_use = dist_px
 
     if transformer is not None:
-        from analytics.homography import image_to_pitch_m
+        from .pitch_helpers import image_to_pitch_m
 
         feet_m = image_to_pitch_m(feet_img, transformer)
         ball_m = image_to_pitch_m(np.array([ball], dtype=np.float32), transformer)
@@ -329,7 +329,7 @@ def ball_instant_speed_m_s(
     """Ball speed in m/s from two image positions (optionally separated by >1 frame)."""
     if fps <= 0 or transformer is None or frame_gap < 1:
         return None
-    from analytics.homography import image_to_pitch_m
+    from .pitch_helpers import image_to_pitch_m
 
     prev_t = prev_transformer if prev_transformer is not None else transformer
     pitch_prev = image_to_pitch_m(np.array([prev_ball], dtype=np.float32), prev_t)

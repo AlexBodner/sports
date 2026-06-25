@@ -41,7 +41,7 @@ from dataclasses import asdict, dataclass
 import numpy as np
 import supervision as sv
 
-from analytics.homography import (
+from .pitch_helpers import (
     image_to_pitch_cm,
     image_to_pitch_m,
     lane_scoring_transformer_for_frame,

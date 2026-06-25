@@ -13,6 +13,7 @@ carrier = importlib.import_module("analytics.pass.carrier")
 possession = importlib.import_module("analytics.pass.possession")
 passes = importlib.import_module("analytics.pass.passes")
 pass_options = importlib.import_module("analytics.pass.pass_options")
+pitch_helpers = importlib.import_module("analytics.pass.pitch_helpers")
 
 attach_ball = ball.attach_ball
 create_ball_detector = ball.create_ball_detector
@@ -40,3 +41,8 @@ PassOption = pass_options.PassOption
 PassWeights = pass_options.PassWeights
 remap_lane_debug_to_pitch_cm = pass_options.remap_lane_debug_to_pitch_cm
 top_pass_options = pass_options.top_pass_options
+
+image_to_pitch_cm = pitch_helpers.image_to_pitch_cm
+image_to_pitch_m = pitch_helpers.image_to_pitch_m
+lane_scoring_transformer_for_frame = pitch_helpers.lane_scoring_transformer_for_frame
+pitch_attack_direction = pitch_helpers.pitch_attack_direction

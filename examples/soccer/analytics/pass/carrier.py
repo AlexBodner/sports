@@ -140,7 +140,7 @@ class BallPositionHistory:
             return None
 
         if transformer is not None:
-            from analytics.homography import image_to_pitch_m
+            from .pitch_helpers import image_to_pitch_m
 
             pts = np.stack([p0, p1], axis=0).astype(np.float32)
             pitch = image_to_pitch_m(pts, transformer)

@@ -670,55 +670,6 @@ _SPORTS_RADAR_COLORS = [
 # Pass analytics homography helpers (ported from world_cup)
 # ---------------------------------------------------------------------------
 
-def infer_goal_defenders(
-    pitch_xy_cm: np.ndarray, teams: np.ndarray, n_defenders: int = 3
-) -> tuple[int, int]:
-    """Return ``(left_goal_team, right_goal_team)`` using defensive blocks.
-
-    Instead of team-wide averages, we look at the 'defensive block' (average of the
-    N most defensive players) for each team at both ends. We then assign teams to
-    the side where their defensive advantage margin is strongest.
-    """
-    from analytics.class_ids import TEAM_LEFT, TEAM_RIGHT
-
-    # 1. Filter and sort X-coordinates for each team
-    x_by_team: dict[int, np.ndarray] = {}
-    for tid in (0, 1):
-        mask = teams == tid
-        if mask.any():
-            x_by_team[tid] = np.sort(pitch_xy_cm[mask, 0])
-        else:
-            x_by_team[tid] = np.array([])
-
-    # Handle missing teams
-    if x_by_team[0].size == 0 or x_by_team[1].size == 0:
-        return TEAM_LEFT, TEAM_RIGHT
-
-    # 2. Calculate Defensive Blocks (average of N most defensive players at each end)
-    # Note: For the left goal, "defensive" means lowest X. For the right, highest X.
-    def _block_avg(x_sorted: np.ndarray, side: str) -> float:
-        n = min(len(x_sorted), n_defenders)
-        if side == "left":
-            return float(x_sorted[:n].mean())
-        else:
-            return float(x_sorted[-n:].mean())
-
-    l0, r0 = _block_avg(x_by_team[0], "left"), _block_avg(x_by_team[0], "right")
-    l1, r1 = _block_avg(x_by_team[1], "left"), _block_avg(x_by_team[1], "right")
-
-    # 3. Calculate Advantage Margins
-    # left_margin > 0 means Team 0 is further left than Team 1
-    left_margin = l1 - l0
-    # right_margin > 0 means Team 1 is further right than Team 0
-    right_margin = r1 - r0
-
-    # 4. Global Handshake: Assign to the side with the stronger dominance
-    if left_margin >= right_margin:
-        return 0, 1
-    else:
-        return 1, 0
-
-
 def pitch_layout_reliable(
     pitch_xy_m: np.ndarray,
     teams: np.ndarray | None = None,
@@ -753,66 +704,7 @@ def pitch_layout_reliable(
     return True
 
 
-def draw_goals_on_pitch(
-    config: SoccerPitchConfiguration,
-    *,
-    left_defender_team: int,
-    right_defender_team: int,
-    team_colors: list[sv.Color] | None = None,
-    padding: int = 50,
-    scale: float = 0.1,
-    pitch: np.ndarray | None = None,
-    fill_alpha: float = 0.38,
-) -> np.ndarray:
-    """Highlight each goal mouth in the defending team's color (radar debug)."""
-    if team_colors is None:
-        team_colors = [
-            sv.Color.from_hex("#00BFFF"),
-            sv.Color.from_hex("#FF1493"),
-        ]
-    if pitch is None:
-        pitch = draw_pitch(config=config, padding=padding, scale=scale)
-
-    w = config.width
-    length = config.length
-    gbw, gbl = config.goal_box_width, config.goal_box_length
-    y0, y1 = (w - gbw) / 2, (w + gbw) / 2
-
-    def _goal_patch(goal_x_cm: float, defender: int, depth_cm: float) -> None:
-        nonlocal pitch
-        color = team_colors[defender % len(team_colors)].as_bgr()
-        mouth_x = int(goal_x_cm * scale) + padding
-        py0 = int(y0 * scale) + padding
-        py1 = int(y1 * scale) + padding
-        inner_x = int((goal_x_cm + depth_cm) * scale) + padding
-        x_lo, x_hi = sorted((mouth_x, inner_x))
-        overlay = pitch.copy()
-        cv2.rectangle(overlay, (x_lo, py0), (x_hi, py1), color, -1)
-        cv2.addWeighted(overlay, fill_alpha, pitch, 1.0 - fill_alpha, 0, pitch)
-        cv2.line(pitch, (mouth_x, py0), (mouth_x, py1), color, 5, cv2.LINE_AA)
-        cv2.line(pitch, (mouth_x, py0), (mouth_x, py1), (255, 255, 255), 1, cv2.LINE_AA)
-
-    _goal_patch(0.0, left_defender_team, gbl)
-    _goal_patch(float(length), right_defender_team, -gbl)
-    return pitch
-
-
-def lane_scoring_transformer_for_frame(
-    speed_transforms: dict[int, ViewTransformer | None] | None,
-    frame_idx: int,
-    keypoints: sv.KeyPoints | None,
-    *,
-    pitch_confidence: float = 0.9,
-) -> ViewTransformer | None:
-    """Prefer gated speed H; fall back to per-frame radar fit for lane scoring only."""
-    if speed_transforms is not None:
-        speed_t = speed_transforms.get(int(frame_idx))
-        if speed_t is not None:
-            return speed_t
-    return homography_from_keypoints_radar(keypoints, confidence=pitch_confidence)
-
-
-def render_radar_simple(
+def render_radar(
     detections: sv.Detections,
     keypoints: sv.KeyPoints | None,
     *,
@@ -822,13 +714,19 @@ def render_radar_simple(
     locked_goal_defenders: tuple[int, int] | None = None,
     debug_keypoints: bool = False,
 ) -> np.ndarray | None:
-    """Minimap: H, team-colored goals, keypoints, player feet."""
+    """Minimap: H, team-colored goals, keypoints, player feet.
+
+    Provide ``transformer`` and/or ``keypoints``; when ``transformer`` is omitted it is
+    fit from ``keypoints``.
+    """
     from analytics.class_ids import (
         GOALKEEPER_CLASS_ID as ROLE_GOALKEEPER,
         PLAYER_CLASS_ID as ROLE_PLAYER,
         TEAM_LEFT,
         TEAM_RIGHT,
     )
+    from analytics.goalkeepers import infer_goal_defenders
+    from analytics.player_motion import draw_goals_on_pitch
 
     t = transformer
     if t is None:
@@ -934,95 +832,6 @@ def render_radar_simple(
     return radar
 
 
-def render_radar_from_transformer(
-    detections: sv.Detections,
-    transformer: ViewTransformer,
-    *,
-    config: SoccerPitchConfiguration = PITCH_CONFIG,
-    locked_goal_defenders: tuple[int, int] | None = None,
-) -> np.ndarray | None:
-    """Warp player feet with a precomputed homography."""
-    from analytics.class_ids import (
-        GOALKEEPER_CLASS_ID as ROLE_GOALKEEPER,
-        PLAYER_CLASS_ID as ROLE_PLAYER,
-        TEAM_LEFT,
-        TEAM_RIGHT,
-    )
-
-    outfield_mask = detections.class_id == ROLE_PLAYER
-    gk_mask = detections.class_id == ROLE_GOALKEEPER
-    radar = draw_pitch(config=config)
-    transformed_xy = None
-    teams = None
-    gk_xy = None
-
-    if outfield_mask.any():
-        outfield = detections[outfield_mask]
-        xy = outfield.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
-        transformed_xy = transformer.transform_points(points=xy.astype(np.float32))
-        teams = outfield.data.get("team", np.zeros(len(outfield), dtype=int))
-        if locked_goal_defenders is not None:
-            left_team, right_team = locked_goal_defenders
-        else:
-            left_team, right_team = infer_goal_defenders(transformed_xy, teams)
-    else:
-        left_team, right_team = TEAM_LEFT, TEAM_RIGHT
-
-    if gk_mask.any():
-        gks = detections[gk_mask]
-        gk_feet = gks.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
-        gk_xy = transformer.transform_points(points=gk_feet.astype(np.float32))
-
-    radar = draw_goals_on_pitch(
-        config,
-        left_defender_team=left_team,
-        right_defender_team=right_team,
-        team_colors=_SPORTS_RADAR_COLORS,
-        pitch=radar,
-    )
-    if transformed_xy is not None and teams is not None:
-        for team_id, color in enumerate(_SPORTS_RADAR_COLORS[:2]):
-            team_mask = teams == team_id
-            if not team_mask.any():
-                continue
-            radar = draw_points_on_pitch(
-                config=config,
-                xy=transformed_xy[team_mask],
-                face_color=color,
-                edge_color=sv.Color.BLACK,
-                radius=20,
-                pitch=radar,
-            )
-
-    if gk_xy is not None and gk_mask.any():
-        gk_teams = detections[gk_mask].data.get(
-            "team", np.full(len(gk_xy), -1, dtype=int)
-        )
-        for team_id, color in enumerate(_SPORTS_RADAR_COLORS[:2]):
-            team_mask = gk_teams == team_id
-            if not team_mask.any():
-                continue
-            radar = draw_points_on_pitch(
-                config=config,
-                xy=gk_xy[team_mask],
-                face_color=color,
-                edge_color=sv.Color.WHITE,
-                radius=16,
-                pitch=radar,
-            )
-        neutral = ~np.isin(gk_teams, (0, 1))
-        if neutral.any():
-            radar = draw_points_on_pitch(
-                config=config,
-                xy=gk_xy[neutral],
-                face_color=sv.Color.from_hex("#E8E8E8"),
-                edge_color=sv.Color.BLACK,
-                radius=14,
-                pitch=radar,
-            )
-    return radar
-
-
 def pitch_keypoint_confidence(
     keypoints: sv.KeyPoints, n_vertices: int | None = None
 ) -> np.ndarray:
@@ -1038,14 +847,6 @@ def pitch_keypoint_confidence(
     if len(conf) < n:
         conf = np.pad(conf, (0, n - len(conf)))
     return conf[:n]
-
-
-def image_to_pitch_cm(
-    points_xy: np.ndarray, transformer: ViewTransformer | None
-) -> np.ndarray | None:
-    if transformer is None or points_xy.size == 0:
-        return None
-    return transformer.transform_points(points_xy.astype(np.float32))
 
 
 def pitch_cm_to_image(
@@ -1091,43 +892,6 @@ def pitch_circle_to_image(
         return None
     return np.round(img).astype(np.int32)
 
-
-def image_to_pitch_m(
-    points_xy: np.ndarray, transformer: ViewTransformer | None
-) -> np.ndarray | None:
-    cm = image_to_pitch_cm(points_xy, transformer)
-    if cm is None:
-        return None
-    return cm / 100.0
-
-
-def pitch_attack_direction(
-    detections: sv.Detections,
-    carrier_team: int,
-    transformer: ViewTransformer,
-    *,
-    player_mask_fn,
-    feet_fn,
-) -> np.ndarray:
-    from analytics.geometry import unit
-    from analytics.class_ids import TEAM_LEFT
-
-    pmask = player_mask_fn(detections)
-    if not pmask.any():
-        return np.array([1.0, 0.0])
-
-    feet = feet_fn(detections)[pmask]
-    teams = detections.data["team"][pmask]
-    pitch_xy = image_to_pitch_m(feet, transformer)
-    if pitch_xy is None:
-        return np.array([1.0, 0.0])
-
-    own = pitch_xy[teams == carrier_team]
-    opp = pitch_xy[teams == (1 - carrier_team)]
-    if len(own) == 0 or len(opp) == 0:
-        return np.array([1.0, 0.0]) if carrier_team == TEAM_LEFT else np.array([-1.0, 0.0])
-
-    return unit(opp.mean(axis=0) - own.mean(axis=0))
 
 def _keypoint_image_valid(x: float, y: float) -> bool:
     return bool(np.isfinite(x) and np.isfinite(y) and x > 1 and y > 1)

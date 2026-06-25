@@ -20,7 +20,7 @@ from analytics.annotations import (
     draw_radar_minimap,
 )
 from analytics.clip_pipeline import ClipAnalysis, compute_clip_analysis
-from analytics.homography import (
+from analytics.pass_imports import (
     image_to_pitch_cm,
     image_to_pitch_m,
     lane_scoring_transformer_for_frame,
