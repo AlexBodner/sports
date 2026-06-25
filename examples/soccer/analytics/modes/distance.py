@@ -18,7 +18,7 @@ import numpy as np
 import supervision as sv
 
 from analytics.clip_pipeline import ClipAnalysis, compute_clip_analysis
-from analytics.speed import _draw_speed_overlay, _speed_by_tid
+from analytics.modes.speed import _draw_speed_overlay, _speed_by_tid
 from analytics.player_motion import (
     JoystickDotSmoother,
     KalmanSpeedDisplaySmoother,
