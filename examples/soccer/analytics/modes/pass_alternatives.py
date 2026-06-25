@@ -19,7 +19,6 @@ from analytics.annotations import (
     draw_pitch_keypoints_debug,
     draw_radar_minimap,
 )
-from analytics.pass.carrier import BallPositionHistory, TrackPositionHistory
 from analytics.clip_pipeline import ClipAnalysis, compute_clip_analysis
 from analytics.homography import (
     image_to_pitch_cm,
@@ -27,16 +26,20 @@ from analytics.homography import (
     lane_scoring_transformer_for_frame,
     pitch_attack_direction,
 )
-from analytics.pass.pass_options import PassOption, PassWeights, top_pass_options
-from analytics.player_motion import JoystickDotSmoother, carrier_kalman_direction, open_video
-from analytics.pass.possession import (
+from analytics.pass_imports import (
+    BallPositionHistory,
     Carrier,
+    PassOption,
+    PassWeights,
+    TrackPositionHistory,
     ball_xy,
     bbox_center_xy,
     feet_xy,
     find_control_carrier,
     player_mask,
+    top_pass_options,
 )
+from analytics.player_motion import JoystickDotSmoother, carrier_kalman_direction, open_video
 
 
 @dataclass(frozen=True)

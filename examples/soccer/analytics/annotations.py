@@ -31,9 +31,8 @@ from analytics.homography import (
     render_radar_from_transformer,
     render_radar_sports,
 )
-from analytics.pass.possession import ball_xy, feet_xy, player_mask
+from analytics.pass_imports import PassOption, ball_xy, feet_xy, player_mask
 from analytics.class_ids import ROLE_GOALKEEPER, ROLE_PLAYER
-from analytics.pass.pass_options import PassOption
 
 ROBOFLOW_PURPLE = sv.Color.from_hex("#8315F9")
 ROBOFLOW_PURPLE_BGR = ROBOFLOW_PURPLE.as_bgr()
@@ -403,7 +402,7 @@ def draw_kalman_joystick_dots(
     if not pmask.any():
         return frame
 
-    from analytics.pass.possession import feet_xy
+    from analytics.pass_imports import feet_xy
     from analytics.player_motion import kalman_ground_speed_m_s
 
     feet = feet_xy(dets) if show_speed else None
@@ -1662,8 +1661,7 @@ def _options_with_lane_debug(
 ) -> list[PassOption]:
     """Re-score if needed so freeze frames always carry pitch corridor geometry."""
     from analytics.homography import pitch_attack_direction
-    from analytics.pass.pass_options import top_pass_options
-    from analytics.pass.possession import bbox_center_xy
+    from analytics.pass_imports import PassWeights, bbox_center_xy, remap_lane_debug_to_pitch_cm, top_pass_options
 
     if event.options and all(o.lane_debug is not None for o in event.options):
         return event.options
@@ -1720,7 +1718,7 @@ def draw_pass_overlay(
     ``reveal_progress``: 0-1 animation within the current reveal phase.
     """
     from analytics.homography import homography_from_keypoints_radar, render_radar_simple
-    from analytics.pass.pass_options import PassWeights, remap_lane_debug_to_pitch_cm
+    from analytics.pass_imports import PassWeights, remap_lane_debug_to_pitch_cm
 
     if weights is None:
         weights = PassWeights()

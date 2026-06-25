@@ -45,12 +45,13 @@ from analytics.player_motion import (
     open_video,
     resolve_goalkeepers_team_id,
 )
-from analytics.pass.ball import attach_ball, create_ball_detector
-from analytics.pass.possession import ball_xy
-from analytics.pass.passes import (
+from analytics.pass_imports import (
     PassDetectionConfig,
     PassQualityScorer,
     PossessionScanResult,
+    attach_ball,
+    ball_xy,
+    create_ball_detector,
     scan_possession_events,
 )
 from analytics.teams import apply_team_lock, relock_detection_teams
@@ -302,7 +303,7 @@ class ClipAnalysis:
         """Cinematic freeze-moment pass options (PASS_ALTERNATIVES planning)."""
         if self._pass_alternative_events is None:
             from analytics.modes.pass_alternatives import plan_pass_events
-            from analytics.pass.pass_options import PassWeights
+            from analytics.pass_imports import PassWeights
 
             metric = self.metric
             self._pass_alternative_events = plan_pass_events(

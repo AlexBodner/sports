@@ -47,7 +47,7 @@ from analytics.homography import (
     lane_scoring_transformer_for_frame,
     pitch_attack_direction,
 )
-from analytics.pass.possession import (
+from .possession import (
     Carrier,
     ball_xy,
     bbox_center_xy,
@@ -57,14 +57,14 @@ from analytics.pass.possession import (
     find_reception_carrier,
     player_mask,
 )
-from analytics.pass.possession import (
+from .possession import (
     AERIAL_DY_THRESHOLD_PX,
     CONTROL_MAX_DISTANCE_M,
     CONTROL_MAX_DISTANCE_PX,
     RECEPTION_MAX_DISTANCE_M,
     RECEPTION_MAX_DISTANCE_PX,
 )
-from analytics.pass.possession import (
+from .possession import (
     TouchValidationConfig,
     ball_departed_for_one_touch,
     ball_redirected_at_touch,
@@ -77,13 +77,13 @@ from analytics.pass.possession import (
 )
 from analytics.class_ids import GOALKEEPER_CLASS_ID as ROLE_GOALKEEPER
 from analytics.player_motion import carrier_kalman_direction
-from analytics.pass.pass_options import (
+from .pass_options import (
     PassOption,
     PassWeights,
     score_pass_options,
     top_pass_options,
 )
-from analytics.pass.carrier import (
+from .carrier import (
     CarrierFrameState,
     CarrierTrackingConfig,
     build_carrier_timeline,
@@ -653,7 +653,7 @@ def _touch_valid_or_redirect(
         return False
     ball = carrier.ball
     tid = int(dets.tracker_id[carrier.index]) if dets.tracker_id is not None else -1
-    from analytics.pass.possession import nearest_player_tid
+    from .possession import nearest_player_tid
 
     nearest_tid = nearest_player_tid(dets, ball)
     return nearest_tid is not None and nearest_tid == tid

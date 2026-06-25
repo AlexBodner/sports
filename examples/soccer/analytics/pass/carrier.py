@@ -11,7 +11,7 @@ import numpy as np
 import supervision as sv
 
 from analytics.geometry import unit
-from analytics.pass.possession import Carrier, player_mask
+from .possession import Carrier, player_mask
 
 
 class TrackPositionHistory:
@@ -241,7 +241,7 @@ from dataclasses import asdict, dataclass
 import numpy as np
 import supervision as sv
 
-from analytics.pass.possession import (
+from .possession import (
     Carrier,
     ball_xy,
     feet_xy,
@@ -249,14 +249,14 @@ from analytics.pass.possession import (
     find_ball_carrier,
     player_mask,
 )
-from analytics.pass.possession import (
+from .possession import (
     AERIAL_DY_THRESHOLD_PX,
     CONTROL_MAX_DISTANCE_M,
     CONTROL_MAX_DISTANCE_PX,
     RECEPTION_MAX_DISTANCE_M,
     RECEPTION_MAX_DISTANCE_PX,
 )
-from analytics.pass.possession import (
+from .possession import (
     TouchValidationConfig,
     is_aerial_flyby_below_feet,
     is_aerial_touch,
