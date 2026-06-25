@@ -27,9 +27,8 @@ def select_best_ball(
     balls: sv.Detections,
     *,
     players: sv.Detections | None = None,
-    prev_ball_xy: np.ndarray | None = None,
 ) -> sv.Detections:
-    """Pick one ball box: nearest players, else previous position, else highest confidence."""
+    """Pick one ball box: nearest player feet when ambiguous, else highest confidence."""
     if len(balls) <= 1:
         return balls
     if players is not None and len(players):
@@ -41,11 +40,6 @@ def select_best_ball(
             ).min(axis=1)
             pick = int(np.argmin(dists))
             return balls[pick : pick + 1]
-    if prev_ball_xy is not None:
-        centers = _ball_centers(balls)
-        dists = np.linalg.norm(centers - prev_ball_xy, axis=1)
-        pick = int(np.argmin(dists))
-        return balls[pick : pick + 1]
     if balls.confidence is None:
         return balls[:1]
     pick = int(np.argmax(balls.confidence))
@@ -85,11 +79,9 @@ def _ball_row_for_merge(ball: sv.Detections, players: sv.Detections) -> sv.Detec
 def attach_ball(
     dets: sv.Detections,
     ball_dets: sv.Detections,
-    *,
-    prev_ball_xy: np.ndarray | None = None,
 ) -> sv.Detections:
     """Append the best ball row to a player/GK detections frame."""
-    ball = select_best_ball(ball_dets, players=dets, prev_ball_xy=prev_ball_xy)
+    ball = select_best_ball(ball_dets, players=dets)
     if len(ball) == 0:
         return dets
     ball = _ball_row_for_merge(ball, dets)

@@ -50,7 +50,6 @@ from analytics.pass_imports import (
     PassQualityScorer,
     PossessionScanResult,
     attach_ball,
-    ball_xy,
     create_ball_detector,
     scan_possession_events,
 )
@@ -326,7 +325,6 @@ def _build_pass_frames(analysis: ClipAnalysis) -> list[tuple[int, sv.Detections]
     cap, _, _, _ = open_video(analysis.source_video_path)
     out: list[tuple[int, sv.Detections]] = []
     frame_idx = 0
-    prev_ball_xy: np.ndarray | None = None
     try:
         while True:
             ret, frame = cap.read()
@@ -343,8 +341,7 @@ def _build_pass_frames(analysis: ClipAnalysis) -> list[tuple[int, sv.Detections]
                 locks=locks,
                 vel_smoother=vel_smoother,
             )
-            dets = attach_ball(dets, ball_detector(frame), prev_ball_xy=prev_ball_xy)
-            prev_ball_xy = ball_xy(dets)
+            dets = attach_ball(dets, ball_detector(frame))
             out.append((frame_idx, dets))
     finally:
         cap.release()
