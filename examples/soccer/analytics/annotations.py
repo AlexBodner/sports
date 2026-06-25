@@ -32,6 +32,14 @@ from analytics.homography import (
 from analytics.pass_imports import image_to_pitch_m, pitch_attack_direction
 from analytics.pass_imports import PassOption, ball_xy, feet_xy, player_mask
 from analytics.class_ids import ROLE_GOALKEEPER, ROLE_PLAYER
+from analytics.draw_helpers import cv2_safe_text, draw_text_shadow
+from analytics.player_motion import (
+    _dot_radius_for_ellipse,
+    _joystick_dot_reach,
+    draw_speed_badge,
+    kalman_speed_stick,
+    player_ellipse_geometry,
+)
 
 ROBOFLOW_PURPLE = sv.Color.from_hex("#8315F9")
 ROBOFLOW_PURPLE_BGR = ROBOFLOW_PURPLE.as_bgr()
@@ -99,58 +107,6 @@ def team_class_ids(teams: np.ndarray) -> np.ndarray:
     return np.where(np.isin(teams, (0, 1)), teams, 2).astype(int)
 
 
-def cv2_safe_text(text: str) -> str:
-    """OpenCV Hershey fonts only render ASCII; map common Unicode punctuation."""
-    for src, dst in (
-        ("\u00b7", " "),  # middle dot
-        ("\u2192", "->"),  # right arrow
-        ("\u2014", "-"),  # em dash
-        ("\u2013", "-"),  # en dash
-        ("\u2026", "..."),  # ellipsis
-        ("\u00d7", "x"),  # multiplication sign
-        ("\u2264", "<="),  # less-than or equal
-        ("\u2265", ">="),  # greater-than or equal
-        ("\u00b0", " deg"),  # degree sign
-    ):
-        text = text.replace(src, dst)
-    return text.encode("ascii", "replace").decode("ascii")
-
-
-def draw_text_shadow(
-    frame: np.ndarray,
-    text: str,
-    org: tuple[int, int],
-    *,
-    font_scale: float = 0.7,
-    color_bgr: tuple[int, int, int] = (255, 255, 255),
-    thickness: int = 2,
-    shadow_offset: tuple[int, int] = (2, 2),
-) -> None:
-    text = cv2_safe_text(text)
-    x, y = org
-    sx, sy = shadow_offset
-    cv2.putText(
-        frame,
-        text,
-        (x + sx, y + sy),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        font_scale,
-        (12, 12, 12),
-        thickness + 1,
-        cv2.LINE_AA,
-    )
-    cv2.putText(
-        frame,
-        text,
-        (x, y),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        font_scale,
-        color_bgr,
-        thickness,
-        cv2.LINE_AA,
-    )
-
-
 def draw_hud_bar(frame: np.ndarray, title: str, *, height: int = 44) -> np.ndarray:
     h, w = frame.shape[:2]
     overlay = frame.copy()
@@ -188,190 +144,6 @@ def draw_branding_tag(frame: np.ndarray, text: str = "powered by trackers") -> n
     return frame
 
 
-
-
-def _player_ellipse_geometry(xyxy: np.ndarray) -> tuple[int, int, float, float]:
-    """Match ``sv.EllipseAnnotator``: feet center + axis-aligned semi-axes."""
-    x1, _y1, x2, y2 = xyxy.astype(np.float64)
-    cx = int((x1 + x2) / 2)
-    cy = int(y2)
-    a = float(x2 - x1)
-    b = 0.35 * a
-    return cx, cy, a, b
-
-
-def _ellipse_extent_in_direction(a: float, b: float, ux: float, uy: float) -> float:
-    """Distance from ellipse center to edge along a unit direction."""
-    denom = (b * ux) ** 2 + (a * uy) ** 2
-    if denom < 1e-12:
-        return float(min(a, b))
-    return float((a * b) / np.sqrt(denom))
-
-
-def _joystick_dot_reach(
-    stick: float,
-    a: float,
-    b: float,
-    ux: float,
-    uy: float,
-    *,
-    dot_radius: float,
-    ellipse_thickness: float = 2.0,
-) -> float:
-    """Center distance for a joystick dot tied to the drawn ellipse.
-
-    At full deflection the dot center sits on the ellipse edge plus its radius so
-    the filled circle can extend to the outer side of the stroke.
-    """
-    edge = _ellipse_extent_in_direction(a, b, ux, uy)
-    outer = edge + 0.5 * ellipse_thickness + dot_radius
-    return float(stick) * outer
-
-
-def kalman_speed_stick(
-    speed_px: float,
-    *,
-    min_speed_px: float = 0.5,
-    max_speed_px: float = 4.0,
-) -> float | None:
-    """Map Kalman speed (px/frame) to joystick deflection in [0, 1]."""
-    if not np.isfinite(speed_px) or speed_px < min_speed_px:
-        return None
-    if max_speed_px <= min_speed_px:
-        return 1.0
-    linear = float(np.clip((speed_px - min_speed_px) / (max_speed_px - min_speed_px), 0.0, 1.0))
-    # Slight curve so typical jogging reads closer to the ellipse edge.
-    return float(np.sqrt(linear))
-
-
-def _dot_radius_for_ellipse(semi_axis_a: float) -> int:
-    """Scale dot with bbox width (matches ellipse horizontal semi-axis)."""
-    return int(np.clip(round(semi_axis_a * 0.13), 3, 8))
-
-
-_KALMAN_SPEED_BADGE_BG_BGR = (16, 18, 24)
-KALMAN_SPEED_SPRINT_MS = 5.0
-
-
-def format_kalman_speed_value(speed_m_s: float) -> str:
-    """Round to 1 decimal m/s — readable without false precision."""
-    speed_m_s = max(0.0, float(speed_m_s))
-    return f"{round(speed_m_s, 1):.1f}"
-
-
-def _kalman_speed_badge_radial(
-    cx: float,
-    cy: float,
-    px: float,
-    py: float,
-    vx: float,
-    vy: float,
-    *,
-    min_speed_px: float = 0.5,
-) -> tuple[float, float]:
-    """Outward ray for the badge: stick direction, else Kalman velocity, else up."""
-    dx, dy = float(px - cx), float(py - cy)
-    dist = float(np.hypot(dx, dy))
-    if dist >= 1.0:
-        return dx / dist, dy / dist
-    speed = float(np.hypot(vx, vy))
-    if np.isfinite(vx) and np.isfinite(vy) and speed >= min_speed_px:
-        return vx / speed, vy / speed
-    return 0.0, -1.0
-
-
-def draw_kalman_speed_badge(
-    frame: np.ndarray,
-    speed_m_s: float,
-    cx: float,
-    cy: float,
-    px: int,
-    py: int,
-    vx: float,
-    vy: float,
-    *,
-    team_bgr: tuple[int, int, int],
-    dot_radius: int,
-    min_speed_px: float = 0.5,
-) -> None:
-    """Speed chip riding just outside the smoothed joystick dot along the stick ray."""
-    value = format_kalman_speed_value(speed_m_s)
-    font = cv2.FONT_HERSHEY_DUPLEX
-    value_scale, value_thick = 0.48, 1
-
-    (vw, vh), baseline = cv2.getTextSize(value, font, value_scale, value_thick)
-    pad_x, pad_y = 3, 2
-    rail_w = 2
-    box_w = vw + pad_x * 2 + rail_w
-    box_h = vh + baseline + pad_y * 2
-
-    ux, uy = _kalman_speed_badge_radial(
-        cx, cy, float(px), float(py), vx, vy, min_speed_px=min_speed_px
-    )
-    outward = float(dot_radius) + 5.0 + box_h * 0.5
-    bcx = float(px) + ux * outward
-    bcy = float(py) + uy * outward
-
-    x0 = int(round(bcx - box_w * 0.5))
-    y0 = int(round(bcy - box_h * 0.5))
-    x1 = x0 + box_w
-    y1 = y0 + box_h
-
-    fh, fw = frame.shape[:2]
-    x0 = int(np.clip(x0, 2, max(2, fw - box_w - 2)))
-    x1 = x0 + box_w
-    y0 = int(np.clip(y0, 2, max(2, fh - box_h - 2)))
-    y1 = y0 + box_h
-
-    border = (
-        team_bgr
-        if speed_m_s >= KALMAN_SPEED_SPRINT_MS
-        else tuple(int(c * 0.7) for c in team_bgr)
-    )
-
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (x0, y0), (x1, y1), _KALMAN_SPEED_BADGE_BG_BGR, -1)
-    cv2.rectangle(overlay, (x0, y0), (x0 + rail_w, y1), team_bgr, -1)
-    cv2.rectangle(overlay, (x0, y0), (x1, y1), border, 1, cv2.LINE_AA)
-    frame[:] = cv2.addWeighted(overlay, 0.62, frame, 0.38, 0)
-
-    text_x = x0 + rail_w + pad_x
-    text_y = y0 + pad_y + vh
-    draw_text_shadow(
-        frame,
-        value,
-        (text_x, text_y),
-        font_scale=value_scale,
-        color_bgr=(240, 242, 248),
-        thickness=value_thick,
-        shadow_offset=(1, 1),
-    )
-
-
-def draw_kalman_speed_legend(frame: np.ndarray) -> np.ndarray:
-    """Global unit key — numbers on players are m/s."""
-    text = "speed  m/s"
-    font = cv2.FONT_HERSHEY_DUPLEX
-    scale, thick = 0.42, 1
-    (tw, th), baseline = cv2.getTextSize(text, font, scale, thick)
-    pad_x, pad_y = 8, 5
-    x0, y1 = 12, frame.shape[0] - 12
-    y0 = y1 - th - baseline - pad_y * 2
-    x1 = x0 + tw + pad_x * 2
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (x0, y0), (x1, y1), (16, 18, 24), -1)
-    cv2.rectangle(overlay, (x0, y0), (x1, y1), (70, 72, 82), 1, cv2.LINE_AA)
-    frame[:] = cv2.addWeighted(overlay, 0.62, frame, 0.38, 0)
-    draw_text_shadow(
-        frame,
-        text,
-        (x0 + pad_x, y0 + pad_y + th),
-        font_scale=scale,
-        color_bgr=(175, 180, 192),
-        thickness=thick,
-        shadow_offset=(1, 1),
-    )
-    return frame
 
 
 def draw_kalman_joystick_dots(
@@ -414,7 +186,7 @@ def draw_kalman_joystick_dots(
         team = int(teams[i])
         if team not in (0, 1):
             continue
-        cx, cy, a, b = _player_ellipse_geometry(dets.xyxy[i])
+        cx, cy, a, b = player_ellipse_geometry(dets.xyxy[i])
         radius = _dot_radius_for_ellipse(a)
         vx, vy = float(kf_vx[i]), float(kf_vy[i])
         speed_px = 0.0
@@ -480,7 +252,7 @@ def draw_kalman_joystick_dots(
             speed_badges.sort(key=lambda item: item[0], reverse=True)
             speed_badges = speed_badges[:max_speed_labels]
         for speed_m_s, cx, cy, px, py, radius, vx, vy, color in speed_badges:
-            draw_kalman_speed_badge(
+            draw_speed_badge(
                 frame,
                 speed_m_s,
                 float(cx),

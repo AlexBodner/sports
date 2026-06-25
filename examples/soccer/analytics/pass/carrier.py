@@ -11,7 +11,8 @@ import numpy as np
 import supervision as sv
 
 from analytics.geometry import unit
-from .possession import Carrier, player_mask
+from analytics.player_motion import player_mask
+from .possession import Carrier
 
 
 class TrackPositionHistory:
@@ -183,11 +184,10 @@ import supervision as sv
 from .possession import (
     Carrier,
     ball_xy,
-    feet_xy,
     find_active_carrier,
     find_ball_carrier,
-    player_mask,
 )
+from analytics.player_motion import feet_xy, player_mask
 from .possession import (
     AERIAL_DY_THRESHOLD_PX,
     CONTROL_MAX_DISTANCE_M,

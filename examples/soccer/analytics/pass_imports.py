@@ -25,9 +25,9 @@ Carrier = possession.Carrier
 ball_xy = possession.ball_xy
 bbox_center_xy = possession.bbox_center_xy
 carrier_from_tracker_id = possession.carrier_from_tracker_id
-feet_xy = possession.feet_xy
 find_control_carrier = possession.find_control_carrier
-player_mask = possession.player_mask
+
+from analytics.player_motion import feet_xy, player_mask  # noqa: E402
 
 InferredPass = passes.InferredPass
 InferredTurnover = passes.InferredTurnover

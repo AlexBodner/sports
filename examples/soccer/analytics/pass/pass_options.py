@@ -37,9 +37,8 @@ from analytics.geometry import (
 from .possession import (
     Carrier,
     bbox_center_xy,
-    feet_xy,
-    player_mask,
 )
+from analytics.player_motion import feet_xy, player_mask
 from .possession import (
     CONTROL_MAX_DISTANCE_M,
     CONTROL_MAX_DISTANCE_PX,

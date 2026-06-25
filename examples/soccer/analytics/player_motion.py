@@ -517,7 +517,6 @@ def carrier_kalman_direction(
 ) -> np.ndarray | None:
     """Unit movement direction for the ball carrier from Kalman velocity."""
     from analytics.geometry import unit
-    from analytics.pass_imports import feet_xy
 
     if detections.data is None:
         return None
@@ -865,6 +864,16 @@ def _draw_text_shadow(
         font=cv2.FONT_HERSHEY_DUPLEX,
         ascii_safe=False,
     )
+
+
+def player_ellipse_geometry(xyxy: np.ndarray) -> tuple[int, int, float, float]:
+    """Match ``sv.EllipseAnnotator``: feet center + axis-aligned semi-axes."""
+    x1, _y1, x2, y2 = xyxy.astype(np.float64)
+    cx = int((x1 + x2) / 2)
+    cy = int(y2)
+    a = float(x2 - x1)
+    b = 0.35 * a
+    return cx, cy, a, b
 
 
 def _chip_box_size(text: str) -> tuple[int, int, int, int]:

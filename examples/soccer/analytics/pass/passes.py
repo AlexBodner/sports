@@ -51,12 +51,11 @@ from .possession import (
     Carrier,
     ball_xy,
     bbox_center_xy,
-    feet_xy,
     find_active_carrier,
     find_control_carrier,
     find_reception_carrier,
-    player_mask,
 )
+from analytics.player_motion import feet_xy, player_mask
 from .possession import (
     AERIAL_DY_THRESHOLD_PX,
     CONTROL_MAX_DISTANCE_M,

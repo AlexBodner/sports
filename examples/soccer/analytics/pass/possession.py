@@ -30,11 +30,7 @@ from analytics.class_ids import (
     GOALKEEPER_CLASS_ID as ROLE_GOALKEEPER,
     PLAYER_CLASS_ID as ROLE_PLAYER,
 )
-
-
-def feet_xy(detections: sv.Detections) -> np.ndarray:
-    """Bottom-center anchor (the players' feet / ground contact point)."""
-    return detections.get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
+from analytics.player_motion import feet_xy, player_mask
 
 
 def bbox_center_xy(detections: sv.Detections) -> np.ndarray:
@@ -44,11 +40,6 @@ def bbox_center_xy(detections: sv.Detections) -> np.ndarray:
         [(boxes[:, 0] + boxes[:, 2]) / 2, (boxes[:, 1] + boxes[:, 3]) / 2],
         axis=1,
     )
-
-
-def player_mask(detections: sv.Detections) -> np.ndarray:
-    """Boolean mask of outfield players + goalkeepers."""
-    return np.isin(detections.class_id, (ROLE_PLAYER, ROLE_GOALKEEPER))
 
 
 def ball_xy(detections: sv.Detections) -> np.ndarray | None:
