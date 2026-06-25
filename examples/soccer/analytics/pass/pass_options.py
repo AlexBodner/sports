@@ -153,20 +153,6 @@ class PassLaneDebug:
 
 
 @dataclass(frozen=True)
-class ScoreBreakdown:
-    """Weighted score terms and explicit penalties for explain / debug overlays."""
-
-    openness_term: float
-    forward_term: float
-    space_term: float
-    teammate_penalty: float
-    backward_run_penalty: float
-    backward_attack_penalty: float
-    subtotal: float
-    total: float
-
-
-@dataclass(frozen=True)
 class PassOption:
     receiver_index: int
     receiver_xy: np.ndarray
@@ -368,49 +354,6 @@ def remap_lane_debug_to_pitch_cm(
         )
         remapped.append(replace(opt, lane_debug=debug))
     return remapped
-
-
-def decompose_lane_score(
-    option: PassOption,
-    weights: PassWeights,
-    *,
-    carrier_feet: np.ndarray,
-    attack_dir: np.ndarray | None = None,
-    carrier_motion_dir: np.ndarray | None = None,
-) -> ScoreBreakdown:
-    """Split a lane score into weighted terms and each penalty deduction."""
-    n_open = min(option.openness / weights.open_ref, 1.0)
-    n_forward = float(np.clip(option.forward_gain / weights.forward_ref, -1.0, 1.0))
-    n_space = min(option.receiver_space / weights.space_ref, 1.0)
-    openness_term = weights.openness * n_open
-    forward_term = weights.forward * max(n_forward, 0.0)
-    space_term = weights.space * n_space
-    subtotal = openness_term + forward_term + space_term
-
-    tm_ref = weights.teammate_open_ref
-    if tm_ref is None:
-        tm_ref = weights.open_ref * 0.5
-    teammate_penalty = _teammate_lane_penalty_amount(
-        option.teammate_openness, weights, open_ref=tm_ref
-    )
-    backward_run_penalty = _backward_motion_penalty_from_align(
-        float(option.motion_alignment), weights
-    )
-    attack = attack_dir if attack_dir is not None else np.array([1.0, 0.0], dtype=np.float32)
-    backward_attack_penalty = _backward_attack_penalty(
-        option.forward_gain, attack, carrier_motion_dir, weights
-    )
-    total = subtotal - teammate_penalty - backward_run_penalty - backward_attack_penalty
-    return ScoreBreakdown(
-        openness_term=openness_term,
-        forward_term=forward_term,
-        space_term=space_term,
-        teammate_penalty=teammate_penalty,
-        backward_run_penalty=backward_run_penalty,
-        backward_attack_penalty=backward_attack_penalty,
-        subtotal=subtotal,
-        total=float(option.score),
-    )
 
 
 def _backward_motion_penalty_from_align(

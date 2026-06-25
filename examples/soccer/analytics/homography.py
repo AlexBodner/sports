@@ -1023,28 +1023,6 @@ def render_radar_from_transformer(
     return radar
 
 
-def render_radar_sports(
-    detections: sv.Detections,
-    keypoints: sv.KeyPoints | None,
-    *,
-    config: SoccerPitchConfiguration = PITCH_CONFIG,
-    confidence: float = 0.5,
-    use_ransac: bool = False,
-    ransac_thresh: float = HOMOGRAPHY_RANSAC_REPROJ_THRESH,
-) -> np.ndarray | None:
-    """Build minimap from per-frame keypoints (sports H + confidence gate)."""
-    t = homography_from_keypoints_radar(
-        keypoints, config=config, confidence=confidence, use_ransac=use_ransac
-    )
-    return render_radar_simple(
-        detections,
-        keypoints,
-        config=config,
-        confidence=confidence,
-        transformer=t,
-    )
-
-
 def pitch_keypoint_confidence(
     keypoints: sv.KeyPoints, n_vertices: int | None = None
 ) -> np.ndarray:

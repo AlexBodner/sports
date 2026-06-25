@@ -29,7 +29,6 @@ from analytics.homography import (
     pitch_keypoint_accept_mask,
     pitch_keypoint_confidence,
     render_radar_from_transformer,
-    render_radar_sports,
 )
 from analytics.pass_imports import PassOption, ball_xy, feet_xy, player_mask
 from analytics.class_ids import ROLE_GOALKEEPER, ROLE_PLAYER
@@ -497,85 +496,10 @@ def draw_kalman_joystick_dots(
     return frame
 
 
-def annotate_kalman_motion_players(
-    frame: np.ndarray,
-    dets: sv.Detections,
-    *,
-    min_speed_px: float = 0.5,
-    max_speed_px: float = 4.0,
-    dot_smoother: JoystickDotSmoother | None = None,
-    speed_smoother: KalmanSpeedDisplaySmoother | None = None,
-    transformer=None,
-    fps: float = 25.0,
-    show_speed: bool = False,
-    min_speed_ms: float = 0.0,
-    max_speed_labels: int = 0,
-    speed_source: str = "kalman",
-) -> np.ndarray:
-    """Team ellipses + Kalman joystick dots only (no labels, ball, or radar)."""
-    outfield = dets[dets.class_id == ROLE_PLAYER]
-    if len(outfield):
-        teams = outfield.data.get("team", np.zeros(len(outfield)))
-        outfield_vis = sv.Detections(
-            xyxy=outfield.xyxy,
-            class_id=team_class_ids(teams),
-            tracker_id=outfield.tracker_id,
-            data=outfield.data,
-        )
-        frame = _ELLIPSE.annotate(frame, outfield_vis)
-
-    gks = dets[dets.class_id == ROLE_GOALKEEPER]
-    if len(gks):
-        gk_teams = gks.data.get("team", np.full(len(gks), -1))
-        has_team = np.isin(gk_teams, (0, 1))
-        if has_team.any():
-            gk_colored = gks[has_team]
-            gk_vis = sv.Detections(
-                xyxy=gk_colored.xyxy,
-                class_id=team_class_ids(gk_teams[has_team]),
-                tracker_id=gk_colored.tracker_id,
-                data=gk_colored.data,
-            )
-            frame = _ELLIPSE.annotate(frame, gk_vis)
-        if (~has_team).any():
-            frame = _GK_ELLIPSE.annotate(frame, gks[~has_team])
-
-    frame = draw_kalman_joystick_dots(
-        frame,
-        dets,
-        min_speed_px=min_speed_px,
-        max_speed_px=max_speed_px,
-        dot_smoother=dot_smoother,
-        speed_smoother=speed_smoother,
-        transformer=transformer,
-        fps=fps,
-        show_speed=show_speed,
-        min_speed_ms=min_speed_ms,
-        max_speed_labels=max_speed_labels,
-        speed_source=speed_source,
-    )
-    if show_speed:
-        frame = draw_kalman_speed_legend(frame)
-    return frame
-
-
-
-
 def _tracker_id_labels(dets: sv.Detections) -> list[str]:
     n = len(dets)
     tids = dets.tracker_id if dets.tracker_id is not None else np.full(n, -1, dtype=int)
     return [f"#{int(tid)}" if int(tid) >= 0 else "" for tid in tids]
-
-
-def annotate_tracking_players(frame: np.ndarray, dets: sv.Detections) -> np.ndarray:
-    """Players + GKs with one stable color per ``tracker_id`` and ID labels."""
-    trackable = dets[np.isin(dets.class_id, (ROLE_PLAYER, ROLE_GOALKEEPER))]
-    if len(trackable):
-        frame = _TRACK_ELLIPSE.annotate(frame, trackable)
-        frame = _TRACK_LABEL.annotate(
-            frame, trackable, labels=_tracker_id_labels(trackable)
-        )
-    return frame
 
 
 def annotate_players(
@@ -654,40 +578,6 @@ def annotate_ball(frame: np.ndarray, dets: sv.Detections) -> np.ndarray:
     return _BALL_TRI.annotate(frame, ball_dets)
 
 
-def draw_ball_speed_arrow(
-    frame: np.ndarray,
-    ball: np.ndarray,
-    velocity: np.ndarray,
-    *,
-    speed_label: str,
-    color: tuple[int, int, int] = (0, 255, 255),
-    min_speed_px: float = 0.5,
-    scale_px: float = 3.0,
-) -> np.ndarray:
-    """Draw ball motion arrow + speed label (raw detection displacement, not Kalman)."""
-    from analytics.geometry import unit
-
-    speed = float(np.linalg.norm(velocity))
-    if speed < min_speed_px:
-        return frame
-    direction = unit(velocity)
-    if direction is None:
-        return frame
-
-    origin = (int(round(float(ball[0]))), int(round(float(ball[1]))))
-    tip = (
-        int(round(origin[0] + direction[0] * speed * scale_px)),
-        int(round(origin[1] + direction[1] * speed * scale_px)),
-    )
-    cv2.arrowedLine(frame, origin, tip, color, 2, tipLength=0.35)
-    label_pos = (
-        int(round((origin[0] + tip[0]) / 2 - 20)),
-        int(round((origin[1] + tip[1]) / 2 - 10)),
-    )
-    draw_text_shadow(frame, speed_label, label_pos, font_scale=0.55, color_bgr=color)
-    return frame
-
-
 def _valid_pitch_cm(
     xy: np.ndarray, config=PITCH_CONFIG, *, margin_cm: float = 200.0
 ) -> np.ndarray:
@@ -755,100 +645,11 @@ def draw_radar_minimap(
     return sv.draw_image(frame, radar, opacity=opacity, rect=rect)
 
 
-draw_radar_bottom_center = draw_radar_minimap
-
-
 _KP_USED_BGR = (80, 220, 80)
 _KP_LOW_CONF_BGR = (80, 80, 255)
 _KP_INVALID_BGR = (140, 140, 140)
 _KP_EDGE_BGR = (70, 70, 90)
 _KP_RAW_BGR = (255, 220, 80)
-_KP_RADAR_SMOOTH_BGR = (220, 80, 255)
-_KP_SPEED_SMOOTH_BGR = (80, 200, 255)
-
-
-def draw_pitch_keypoints_compare(
-    frame: np.ndarray,
-    keypoints: sv.KeyPoints | None,
-    *,
-    radar_smooth_xy: np.ndarray | None = None,
-    speed_smooth_xy: np.ndarray | None = None,
-    confidence_threshold: float = 0.5,
-) -> np.ndarray:
-    """Overlay raw detections vs temporally smoothed points used to fit homography."""
-    margin = 14
-    legend_y = 52
-
-    if keypoints is None or keypoints.xy.shape[0] == 0:
-        draw_text_shadow(
-            frame,
-            "pitch kp: none",
-            (margin, legend_y),
-            font_scale=0.5,
-            color_bgr=(180, 180, 180),
-            thickness=1,
-        )
-        return frame
-
-    xy = keypoints.xy[0]
-    n = len(PITCH_CONFIG.vertices)
-    conf = pitch_keypoint_confidence(keypoints, n_vertices=n)
-
-    def _valid_pt(x: float, y: float) -> bool:
-        return x > 1 and y > 1 and np.isfinite(x) and np.isfinite(y)
-
-    def _draw_smooth(
-        smooth: np.ndarray | None, color: tuple[int, int, int], radius: int
-    ) -> int:
-        if smooth is None:
-            return 0
-        count = 0
-        for i in range(min(len(smooth), n)):
-            x, y = float(smooth[i, 0]), float(smooth[i, 1])
-            if not _valid_pt(x, y):
-                continue
-            px, py = int(x), int(y)
-            cv2.circle(frame, (px, py), radius, color, -1, cv2.LINE_AA)
-            cv2.circle(frame, (px, py), radius, (255, 255, 255), 1, cv2.LINE_AA)
-            count += 1
-        return count
-
-    n_radar = _draw_smooth(radar_smooth_xy, _KP_RADAR_SMOOTH_BGR, 7)
-    n_speed = _draw_smooth(speed_smooth_xy, _KP_SPEED_SMOOTH_BGR, 5)
-
-    n_raw = 0
-    for i in range(min(len(xy), n)):
-        x, y = float(xy[i, 0]), float(xy[i, 1])
-        if not _valid_pt(x, y):
-            continue
-        px, py = int(x), int(y)
-        cv2.circle(frame, (px, py), 4, _KP_RAW_BGR, 1, cv2.LINE_AA)
-        n_raw += 1
-        if radar_smooth_xy is not None and i < len(radar_smooth_xy):
-            sx, sy = float(radar_smooth_xy[i, 0]), float(radar_smooth_xy[i, 1])
-            if _valid_pt(sx, sy):
-                cv2.line(
-                    frame,
-                    (px, py),
-                    (int(sx), int(sy)),
-                    _KP_RADAR_SMOOTH_BGR,
-                    1,
-                    cv2.LINE_AA,
-                )
-
-    summary = f"pitch kp raw {n_raw}  |  smooth radar {n_radar}  speed {n_speed}"
-    draw_text_shadow(
-        frame, summary, (margin, legend_y), font_scale=0.5, color_bgr=(230, 230, 230), thickness=1
-    )
-    for dy, text, color in (
-        (20, "cyan ring = raw model (this frame)", _KP_RAW_BGR),
-        (38, "magenta = smoothed -> radar H", _KP_RADAR_SMOOTH_BGR),
-        (56, "yellow = smoothed -> speed H (conf filter)", _KP_SPEED_SMOOTH_BGR),
-    ):
-        draw_text_shadow(
-            frame, text, (margin, legend_y + dy), font_scale=0.42, color_bgr=color, thickness=1
-        )
-    return frame
 
 
 def _keypoint_xy_valid(x: float, y: float) -> bool:
@@ -959,57 +760,6 @@ def draw_pitch_keypoints_debug(
         draw_text_shadow(
             frame, text, (margin, legend_y + dy), font_scale=0.42, color_bgr=color, thickness=1
         )
-    return frame
-
-
-def draw_homography_feet_debug(
-    frame: np.ndarray,
-    dets: sv.Detections,
-    keypoints: sv.KeyPoints | None,
-    *,
-    confidence_threshold: float = 0.5,
-    reproj_thresh_px: float = 25.0,
-) -> np.ndarray:
-    """Feet warp check using the same confidence-filtered H as the radar."""
-    from analytics.homography import view_transformer_from_keypoints
-
-    transformer = view_transformer_from_keypoints(
-        keypoints, confidence=confidence_threshold, use_ransac=False
-    )
-    if transformer is None:
-        return frame
-
-    pmask = player_mask(dets)
-    if not pmask.any():
-        return frame
-    feet = feet_xy(dets)[pmask]
-    pitch_cm = image_to_pitch_cm(feet, transformer)
-    if pitch_cm is None:
-        return frame
-    back = pitch_cm_to_image(pitch_cm, transformer)
-    if back is None:
-        return frame
-    valid = _valid_pitch_cm(pitch_cm)
-    for foot, reproj, ok in zip(feet, back, valid):
-        fx, fy = int(foot[0]), int(foot[1])
-        if not ok:
-            cv2.circle(frame, (fx, fy), 6, (80, 80, 255), 2, cv2.LINE_AA)
-            continue
-        rx, ry = int(reproj[0]), int(reproj[1])
-        err = float(np.hypot(reproj[0] - foot[0], reproj[1] - foot[1]))
-        color = (80, 220, 80) if err <= reproj_thresh_px else (80, 80, 255)
-        cv2.circle(frame, (fx, fy), 5, color, -1, cv2.LINE_AA)
-        if err > 4.0:
-            cv2.line(frame, (fx, fy), (rx, ry), (255, 220, 80), 1, cv2.LINE_AA)
-            cv2.circle(frame, (rx, ry), 4, (255, 220, 80), 1, cv2.LINE_AA)
-    draw_text_shadow(
-        frame,
-        "feet: green=on-pitch  orange=H warp error  red=off-pitch (sports H)",
-        (14, 118),
-        font_scale=0.42,
-        color_bgr=(200, 200, 200),
-        thickness=1,
-    )
     return frame
 
 
@@ -1330,7 +1080,6 @@ _RADAR_PADDING = 50
 _CORRIDOR_ALPHA_RADAR = 0.45
 _CORRIDOR_ALPHA_VIDEO = 0.38
 _CORRIDOR_ALPHA_PRESENTATION = 0.62
-_CANDIDATE_BGR = (100, 180, 255)
 _RANK_COLORS = [
     sv.Color.from_hex("#3CDC3C"),  # best (Green)
     sv.Color.from_hex("#FFD700"),  # 2nd (Yellow instead of Cyan/blue shadow)
@@ -1397,55 +1146,6 @@ def draw_receiver_highlight(
         frame[:] = cv2.addWeighted(layer, alpha, frame, 1.0 - alpha, 0)
 
 
-def draw_pass_arrows_on_frame(
-    frame: np.ndarray,
-    feet_xy: np.ndarray,
-    carrier_index: int,
-    options: list[PassOption],
-    *,
-    metric: bool = False,
-    show_chips: bool = True,
-    show_length: bool = True,
-    arrow_thickness: int = 5,
-    arrow_alpha: float = 1.0,
-    display_ranks: list[int] | None = None,
-) -> np.ndarray:
-    """Glow arrows, receiver rings, and optional chips — matches freeze overlay."""
-    cx, cy = int(feet_xy[carrier_index, 0]), int(feet_xy[carrier_index, 1])
-    for idx, option in enumerate(options):
-        rank = display_ranks[idx] if display_ranks is not None else idx
-        color = _RANK_BGR[min(rank, len(_RANK_BGR) - 1)]
-        rx, ry = int(feet_xy[option.receiver_index, 0]), int(feet_xy[option.receiver_index, 1])
-        draw_glow_arrow(
-            frame, (cx, cy), (rx, ry), color, thickness=arrow_thickness, alpha=arrow_alpha
-        )
-        if arrow_alpha > 0.2:
-            draw_receiver_highlight(frame, (rx, ry), rank, color, alpha=arrow_alpha)
-        if arrow_alpha < 0.85:
-            continue
-        if show_chips:
-            chip = f"{RANK_LABELS[rank]}  {option.score:.2f}"
-            if metric:
-                chip += f"  {option.length:.1f} m"
-            if option.rivals_in_lane:
-                chip += f"  ({option.rivals_in_lane} riv)"
-            if option.lane_debug and option.lane_debug.blocking_rival_indices:
-                chip += f"  !{len(option.lane_debug.blocking_rival_indices)}"
-            midx, midy = (cx + rx) // 2, (cy + ry) // 2
-            draw_score_chip(frame, chip, (midx, midy), bg_bgr=color)
-        if metric and show_length:
-            lx, ly = pass_line_label_xy((cx, cy), (rx, ry))
-            draw_text_shadow(
-                frame,
-                f"{option.length:.1f} m",
-                (lx - 18, ly - 6),
-                font_scale=0.58,
-                color_bgr=color,
-                thickness=2,
-            )
-    return frame
-
-
 def pitch_cm_to_radar_px(
     points_cm: np.ndarray,
     *,
@@ -1490,29 +1190,6 @@ def _draw_blocker_markers(
             cv2.LINE_AA,
         )
     return seen
-
-
-def draw_candidate_lanes_on_radar(
-    radar: np.ndarray,
-    pitch_cm: np.ndarray,
-    carrier_index: int,
-    receiver_indices: list[int],
-    *,
-    config: SoccerPitchConfiguration = PITCH_CONFIG,
-) -> np.ndarray:
-    """Simple carrier→teammate segments on the minimap (step 1 explain)."""
-    out = radar.copy()
-    if carrier_index >= len(pitch_cm):
-        return out
-    c_pt = pitch_cm_to_radar_px(pitch_cm[carrier_index : carrier_index + 1], config=config)[0]
-    for idx in receiver_indices:
-        if idx >= len(pitch_cm):
-            continue
-        r_pt = pitch_cm_to_radar_px(pitch_cm[idx : idx + 1], config=config)[0]
-        cv2.line(out, tuple(c_pt), tuple(r_pt), _CANDIDATE_BGR, 3, cv2.LINE_AA)
-        cv2.circle(out, tuple(r_pt), 10, _CANDIDATE_BGR, -1, cv2.LINE_AA)
-    cv2.circle(out, tuple(c_pt), 12, (255, 255, 255), 2, cv2.LINE_AA)
-    return out
 
 
 def draw_pass_lanes_on_radar(

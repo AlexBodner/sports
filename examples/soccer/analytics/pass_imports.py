@@ -26,7 +26,6 @@ bbox_center_xy = possession.bbox_center_xy
 carrier_from_tracker_id = possession.carrier_from_tracker_id
 feet_xy = possession.feet_xy
 find_control_carrier = possession.find_control_carrier
-nearest_player_tid = possession.nearest_player_tid
 player_mask = possession.player_mask
 
 InferredPass = passes.InferredPass

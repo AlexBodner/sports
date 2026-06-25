@@ -3498,39 +3498,3 @@ def scan_possession_events(
         passes=tuple(_filter_overlapping_cross_team_passes(passes)),
         turnovers=tuple(turnovers),
     )
-
-
-def detect_pass_events(
-    detections_iter: DetectionIterator,
-    *,
-    scorer: PassQualityScorer,
-    config: PassDetectionConfig = PassDetectionConfig(),
-    metric: bool = True,
-    transformers: dict[int, object] | None = None,
-) -> list[InferredPass]:
-    """Return completed passes only (see :func:`scan_possession_events` for turnovers)."""
-    return list(
-        scan_possession_events(
-            detections_iter,
-            scorer=scorer,
-            config=config,
-            metric=metric,
-            transformers=transformers,
-        ).passes
-    )
-
-
-def build_pass_carrier_timeline(
-    detections_iter: DetectionIterator,
-    *,
-    config: PassDetectionConfig = PassDetectionConfig(),
-    metric: bool = True,
-    transformers: dict[int, object] | None = None,
-) -> list[CarrierFrameState]:
-    """Per-frame carrier signals for debug overlays."""
-    return build_carrier_timeline(
-        detections_iter,
-        config=config.tracking_config(),
-        metric=metric,
-        transformers=transformers,
-    )

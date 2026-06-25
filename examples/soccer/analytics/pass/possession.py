@@ -470,36 +470,6 @@ def is_transit_flyby_touch(
     return speed_px_f >= config.transit_min_speed_px_per_frame
 
 
-def is_transit_flyby_control(
-    dets: sv.Detections,
-    carrier: Carrier,
-    *,
-    prev_ball: np.ndarray | None,
-    config: TouchValidationConfig,
-    fps: float = 25.0,
-    transformer=None,
-    frame_gap: int = 1,
-    prev_transformer=None,
-    speed_prev_ball: np.ndarray | None = None,
-    speed_frame_gap: int | None = None,
-    speed_prev_transformer=None,
-) -> bool:
-    """Alias for :func:`is_transit_flyby_touch` (control-path naming)."""
-    return is_transit_flyby_touch(
-        dets,
-        carrier,
-        prev_ball=prev_ball,
-        config=config,
-        fps=fps,
-        transformer=transformer,
-        frame_gap=frame_gap,
-        prev_transformer=prev_transformer,
-        speed_prev_ball=speed_prev_ball,
-        speed_frame_gap=speed_frame_gap,
-        speed_prev_transformer=speed_prev_transformer,
-    )
-
-
 _MAX_BALL_PATH_JUMP_PX_PER_FRAME = 180.0
 
 

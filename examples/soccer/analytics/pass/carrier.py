@@ -174,67 +174,6 @@ class BallPositionHistory:
         return delta, speed_px_per_frame
 
 
-# Footballs rarely exceed ~35 m/s even on powerful shots; higher ⇒ bad homography.
-MAX_PLAUSIBLE_BALL_SPEED_M_S = 35.0
-# Raw ball bbox jitter / re-detect teleports (image px per frame, ~25 fps).
-MAX_BALL_PX_PER_FRAME = 22.0
-
-
-class BallDirectionSmoother:
-    """EMA on unit direction only — magnitude comes from the lookback window."""
-
-    def __init__(self, *, alpha: float = 0.25) -> None:
-        self.alpha = float(alpha)
-        self._direction: np.ndarray | None = None
-
-    def update(self, delta: np.ndarray | None) -> np.ndarray | None:
-        from analytics.geometry import unit
-
-        if delta is None:
-            return self._direction
-        direction = unit(delta)
-        if direction is None:
-            return self._direction
-        if self._direction is None:
-            self._direction = direction.copy()
-        else:
-            blended = self.alpha * direction + (1.0 - self.alpha) * self._direction
-            self._direction = unit(blended)
-        return self._direction
-
-    def reset(self) -> None:
-        self._direction = None
-
-
-class BallVelocitySmoother:
-    """EMA on ball velocity vectors for debug overlays (raw detections are jittery)."""
-
-    def __init__(self, *, alpha: float = 0.22) -> None:
-        self.alpha = float(alpha)
-        self._velocity: np.ndarray | None = None
-
-    def update(self, velocity: np.ndarray | None) -> np.ndarray | None:
-        if velocity is None:
-            return self._velocity
-        v = np.asarray(velocity, dtype=np.float64)
-        if self._velocity is None:
-            self._velocity = v.copy()
-        else:
-            self._velocity = self.alpha * v + (1.0 - self.alpha) * self._velocity
-        return self._velocity
-
-    def reset(self) -> None:
-        self._velocity = None
-
-
-def plausible_ball_speed_m_s(speed_m_s: float | None) -> float | None:
-    """Drop homography outliers that read as hundreds of m/s."""
-    if speed_m_s is None or speed_m_s <= 0:
-        return None
-    if speed_m_s > MAX_PLAUSIBLE_BALL_SPEED_M_S:
-        return None
-    return speed_m_s
-
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 
