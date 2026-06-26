@@ -1,5 +1,6 @@
 """Detection class ids — matches ``examples/soccer/main.py`` and Inference football models."""
 
+import numpy as np
 import supervision as sv
 
 BALL_CLASS_ID = 0
