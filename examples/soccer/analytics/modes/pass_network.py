@@ -10,15 +10,31 @@ import numpy as np
 import supervision as sv
 
 from analytics.annotations import (
+    ROBOFLOW_PURPLE_BGR,
+    TEAM_COLORS,
     annotate_ball,
     annotate_players,
     draw_branding_tag,
     draw_carrier_ground_ellipse,
+    draw_glow_arrow,
     draw_hud_bar,
+    draw_pass_overlay,
     draw_radar_minimap,
+    draw_score_chip,
+    draw_text_shadow,
+    ease_out_cubic,
 )
 from analytics.clip_pipeline import ClipAnalysis, compute_clip_analysis, _clip_stem
-from analytics.passing import InferredPass, InferredTurnover
+from analytics.modes.pass_alternatives import PassEvent
+from analytics.passing import (
+    InferredPass,
+    InferredTurnover,
+    ball_xy,
+    carrier_from_tracker_id,
+    find_control_carrier,
+    passes_for_overlay,
+)
+from analytics.player_motion import feet_xy, open_video
 
 
 @dataclass(frozen=True)
@@ -186,17 +202,6 @@ def build_pass_network(
         players=tuple(players),
     )
 
-
-from analytics.annotations import (
-    ROBOFLOW_PURPLE_BGR,
-    TEAM_COLORS,
-    draw_glow_arrow,
-    draw_score_chip,
-    draw_text_shadow,
-    ease_out_cubic,
-)
-from analytics.passing import ball_xy, passes_for_overlay
-from analytics.player_motion import feet_xy, open_video
 
 TEAM_COLORS_BGR = [c.as_bgr() for c in TEAM_COLORS[:2]]
 NEUTRAL_BGR = (200, 200, 200)
@@ -733,10 +738,6 @@ def draw_pass_network_frame_overlays(
 
 def _render_pass_network(args, analysis: ClipAnalysis) -> None:
     """Render pass network overlay using a shared :class:`ClipAnalysis`."""
-    from analytics.annotations import draw_pass_overlay
-    from analytics.modes.pass_alternatives import PassEvent
-    from analytics.passing import carrier_from_tracker_id, find_control_carrier
-
     metric = analysis.metric
     locks = analysis.locks("goal_distance")
     locked_goals = locks.locked_goal_defenders

@@ -2,6 +2,21 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+import numpy as np
+import supervision as sv
+
+from analytics.class_ids import (
+    BALL_CLASS_ID as ROLE_BALL,
+    GOALKEEPER_CLASS_ID as ROLE_GOALKEEPER,
+    PLAYER_CLASS_ID as ROLE_PLAYER,
+)
+from analytics.geometry import unit
+from analytics.player_motion import feet_xy, player_mask
+
+from .pitch_helpers import image_to_pitch_m
+
 # Tight dribble at the feet — used for pass passer logic and lane-scoring freezes.
 CONTROL_MAX_DISTANCE_PX = 55.0
 CONTROL_MAX_DISTANCE_M = 0.8
@@ -16,18 +31,6 @@ AERIAL_DY_THRESHOLD_PX = 20.0
 # Aliases for possession modules that use CARRIER_* threshold names.
 CARRIER_MAX_DISTANCE_PX = CONTROL_MAX_DISTANCE_PX
 CARRIER_MAX_DISTANCE_M = CONTROL_MAX_DISTANCE_M
-
-from dataclasses import dataclass
-
-import numpy as np
-import supervision as sv
-
-from analytics.class_ids import (
-    BALL_CLASS_ID as ROLE_BALL,
-    GOALKEEPER_CLASS_ID as ROLE_GOALKEEPER,
-    PLAYER_CLASS_ID as ROLE_PLAYER,
-)
-from analytics.player_motion import feet_xy, player_mask
 
 
 def bbox_center_xy(detections: sv.Detections) -> np.ndarray:
@@ -107,8 +110,6 @@ def find_ball_carrier(
     dist_to_use = dist_px
 
     if transformer is not None:
-        from .pitch_helpers import image_to_pitch_m
-
         feet_m = image_to_pitch_m(feet_img, transformer)
         ball_m = image_to_pitch_m(np.array([ball], dtype=np.float32), transformer)
         if feet_m is not None and ball_m is not None:
@@ -230,12 +231,6 @@ def find_active_carrier(
         return reception, "reception"
     return None, None
 
-from dataclasses import dataclass
-
-import numpy as np
-import supervision as sv
-
-
 
 @dataclass(frozen=True)
 class TouchValidationConfig:
@@ -328,7 +323,6 @@ def ball_instant_speed_m_s(
     """Ball speed in m/s from two image positions (optionally separated by >1 frame)."""
     if fps <= 0 or transformer is None or frame_gap < 1:
         return None
-    from .pitch_helpers import image_to_pitch_m
 
     prev_t = prev_transformer if prev_transformer is not None else transformer
     pitch_prev = image_to_pitch_m(np.array([prev_ball], dtype=np.float32), prev_t)
@@ -513,7 +507,6 @@ def _ball_touch_path_metrics(
     filter_teleports: bool = False,
 ) -> tuple[float, float] | None:
     """Inbound angle (deg) and outbound/inbound speed ratio at ``touch_frame``."""
-    from analytics.geometry import unit
 
     if filter_teleports:
         samples = _ball_path_samples(

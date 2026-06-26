@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from .pitch_helpers import image_to_pitch_m
+
 
 class BallPositionHistory:
     """Recent ball ground positions for speed when picking freeze frames."""
@@ -51,8 +53,6 @@ class BallPositionHistory:
             return None
 
         if transformer is not None:
-            from .pitch_helpers import image_to_pitch_m
-
             pts = np.stack([p0, p1], axis=0).astype(np.float32)
             pitch = image_to_pitch_m(pts, transformer)
             if pitch is None:

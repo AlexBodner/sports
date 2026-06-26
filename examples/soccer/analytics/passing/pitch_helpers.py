@@ -6,6 +6,8 @@ import numpy as np
 import supervision as sv
 from sports.common.view import ViewTransformer
 
+from analytics.class_ids import TEAM_LEFT
+from analytics.geometry import unit
 from analytics.goalkeepers import image_to_pitch_cm
 from analytics.homography import homography_from_keypoints_radar
 
@@ -49,9 +51,6 @@ def pitch_attack_direction(
     player_mask_fn,
     feet_fn,
 ) -> np.ndarray:
-    from analytics.class_ids import TEAM_LEFT
-    from analytics.geometry import unit
-
     pmask = player_mask_fn(detections)
     if not pmask.any():
         return np.array([1.0, 0.0])

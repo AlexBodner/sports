@@ -20,17 +20,28 @@ from analytics.homography import (
     ViewTransformer,
     draw_pitch,
     draw_points_on_pitch,
+    homography_from_keypoints_radar,
     pitch_circle_to_image,
     pitch_cm_to_image,
     pitch_keypoint_accept_mask,
     pitch_keypoint_confidence,
+    pitch_keypoint_inlier_mask,
     render_radar,
+    view_transformer_from_keypoints,
 )
-from analytics.passing import PassOption, ball_xy, image_to_pitch_m, pitch_attack_direction
-from analytics.player_motion import feet_xy, player_mask
+from analytics.passing import (
+    PassOption,
+    PassWeights,
+    ball_xy,
+    bbox_center_xy,
+    image_to_pitch_m,
+    pitch_attack_direction,
+    remap_lane_debug_to_pitch_cm,
+    top_pass_options,
+)
 from analytics.class_ids import ROLE_GOALKEEPER, ROLE_PLAYER, TEAM_COLORS
 from analytics.draw_helpers import cv2_safe_text, draw_text_shadow
-from analytics.player_motion import draw_joystick_dots
+from analytics.player_motion import draw_joystick_dots, draw_team_ellipses, feet_xy, player_mask
 
 ROBOFLOW_PURPLE = sv.Color.from_hex("#8315F9")
 ROBOFLOW_PURPLE_BGR = ROBOFLOW_PURPLE.as_bgr()
@@ -122,8 +133,6 @@ def annotate_players(
     show_tracker_ids: bool = False,
 ) -> np.ndarray:
     del labels  # reserved; tracker ids come from detections when show_tracker_ids
-    from analytics.player_motion import draw_team_ellipses
-
     frame = draw_team_ellipses(
         frame, dets,
         show_ids=show_tracker_ids,
@@ -246,11 +255,6 @@ def draw_pitch_keypoints_debug(
 
     xy = keypoints.xy[0]
     n = len(PITCH_CONFIG.vertices)
-    from analytics.homography import (
-        pitch_keypoint_inlier_mask,
-        view_transformer_from_keypoints,
-    )
-
     conf = pitch_keypoint_confidence(keypoints, n_vertices=n)
     h_t = view_transformer_from_keypoints(
         keypoints, confidence=confidence_threshold, use_ransac=True
@@ -895,8 +899,6 @@ def _options_with_lane_debug(
     pitch_cm: np.ndarray | None = None,
 ) -> list[PassOption]:
     """Re-score if needed so freeze frames always carry pitch corridor geometry."""
-    from analytics.passing import PassWeights, bbox_center_xy, remap_lane_debug_to_pitch_cm, top_pass_options
-
     if event.options and all(o.lane_debug is not None for o in event.options):
         return event.options
     pitch_feet = image_to_pitch_m(feet_xy(dets), transformer)
@@ -948,9 +950,6 @@ def draw_pass_overlay(
     ``revealed_options``: how many top options to show (0 = carrier only, None = all).
     ``reveal_progress``: 0-1 animation within the current reveal phase.
     """
-    from analytics.homography import homography_from_keypoints_radar
-    from analytics.passing import PassWeights, remap_lane_debug_to_pitch_cm
-
     if weights is None:
         weights = PassWeights()
 

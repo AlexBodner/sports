@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from analytics.clip_pipeline import ClipAnalysis
 
 import cv2
 import numpy as np
@@ -19,7 +22,6 @@ from analytics.annotations import (
     draw_pitch_keypoints_debug,
     draw_radar_minimap,
 )
-from analytics.clip_pipeline import ClipAnalysis, compute_clip_analysis
 from analytics.passing import (
     BallPositionHistory,
     Carrier,
@@ -494,6 +496,8 @@ def _render_pass_alternatives(args, analysis: ClipAnalysis) -> None:
 
 def run_pass_alternatives(args, analysis: ClipAnalysis | None = None) -> None:
     """Render cinematic pass-alternative freeze frames to ``args.target_video_path``."""
+    from analytics.clip_pipeline import compute_clip_analysis
+
     if analysis is None:
         analysis = compute_clip_analysis(args, need_homography=True)
     _render_pass_alternatives(args, analysis)

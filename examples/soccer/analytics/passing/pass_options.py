@@ -19,7 +19,7 @@ input coordinates: pixels for v1, meters for v2), then combined with weights.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import supervision as sv
@@ -35,13 +35,10 @@ from analytics.geometry import (
     unit,
 )
 from .possession import (
-    Carrier,
-    bbox_center_xy,
-)
-from analytics.player_motion import feet_xy, player_mask
-from .possession import (
     CONTROL_MAX_DISTANCE_M,
     CONTROL_MAX_DISTANCE_PX,
+    Carrier,
+    bbox_center_xy,
 )
 
 
@@ -316,8 +313,6 @@ def remap_lane_debug_to_pitch_cm(
     Keeps the same receivers as ``options``; only remaps geometry so lanes align
     with the minimap homography.
     """
-    from dataclasses import replace
-
     ci = carrier.index
     remapped: list[PassOption] = []
     for opt in options:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import colorsys
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -39,6 +40,7 @@ from analytics.class_ids import (
     team_vis_class_ids,
 )
 from analytics.draw_helpers import draw_text_shadow
+from analytics.geometry import unit
 from analytics.homography import keypoints_from_inference_field, valid_pitch_cm
 from sports.annotators.soccer import draw_pitch, draw_points_on_pitch
 from sports.common.team import TeamClassifier
@@ -521,7 +523,7 @@ def carrier_kalman_direction(
     min_speed: float = 0.5,
 ) -> np.ndarray | None:
     """Unit movement direction for the ball carrier from Kalman velocity."""
-    from analytics.geometry import unit
+    from analytics.passing.pitch_helpers import image_to_pitch_m
 
     if detections.data is None:
         return None
@@ -538,8 +540,6 @@ def carrier_kalman_direction(
     vel_img = np.array([vx, vy], dtype=np.float64)
     if transformer is None:
         return unit(vel_img)
-    from analytics.passing import image_to_pitch_m
-
     feet = feet_xy(detections)[carrier_index]
     p0 = image_to_pitch_m(feet.reshape(1, 2), transformer)
     p1 = image_to_pitch_m((feet + vel_img).reshape(1, 2), transformer)
@@ -1528,15 +1528,12 @@ def _smooth_xy(xy: np.ndarray, window: int) -> np.ndarray:
     return out
 
 
-from dataclasses import dataclass as _dataclass, field as _field
-
-
-@_dataclass
+@dataclass
 class PlayerTrack:
     track_id: int
-    frames: list[int] = _field(default_factory=list)
-    xy: list[tuple[float, float]] = _field(default_factory=list)
-    box_h: list[float] = _field(default_factory=list)
+    frames: list[int] = field(default_factory=list)
+    xy: list[tuple[float, float]] = field(default_factory=list)
+    box_h: list[float] = field(default_factory=list)
     distance_m: float = 0.0
     cumulative_m: np.ndarray | None = None  # running total aligned with frames
 
