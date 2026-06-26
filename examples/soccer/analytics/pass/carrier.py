@@ -1,7 +1,4 @@
-"""Carrier run/ball motion estimation and per-frame carrier tracking signals.
-
-Merged from carrier_motion + carrier_tracking (move/rename refactor).
-"""
+"""Carrier run/ball motion estimation and per-frame carrier tracking signals."""
 
 from __future__ import annotations
 

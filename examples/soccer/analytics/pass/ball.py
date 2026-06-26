@@ -1,4 +1,4 @@
-"""Ball detection helpers for pass analytics (reuses the tutorial YOLO ball model)."""
+"""Ball detection helpers for pass analytics."""
 
 from __future__ import annotations
 

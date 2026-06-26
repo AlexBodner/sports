@@ -1,4 +1,4 @@
-"""OpenCV overlays for soccer analytics demos (ported from world_cup visual + lane_visual)."""
+"""OpenCV overlays for pass analytics and lane visualization."""
 
 from __future__ import annotations
 

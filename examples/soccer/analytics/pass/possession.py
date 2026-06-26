@@ -1,7 +1,4 @@
-"""Ball-carrier detection, possession config thresholds, and touch validation.
-
-Merged from possession_config + possession + possession_touch (move/rename refactor).
-"""
+"""Ball-carrier detection, possession config thresholds, and touch validation."""
 
 from __future__ import annotations
 
@@ -16,7 +13,7 @@ RECEPTION_MAX_DISTANCE_M = 1.5
 # Vertical offset in image space above/below feet that vetoes ground possession.
 AERIAL_DY_THRESHOLD_PX = 20.0
 
-# Backward-compatible aliases (formerly 80 px / 1.0 m for loose possession).
+# Aliases for possession modules that use CARRIER_* threshold names.
 CARRIER_MAX_DISTANCE_PX = CONTROL_MAX_DISTANCE_PX
 CARRIER_MAX_DISTANCE_M = CONTROL_MAX_DISTANCE_M
 

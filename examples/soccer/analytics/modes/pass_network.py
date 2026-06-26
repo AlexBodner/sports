@@ -1,8 +1,4 @@
-"""Pass network: collaboration aggregation, overlays, and the PASS_NETWORK runner.
-
-Merged from utils/pass_network.py (data) + utils/pass_network_render.py (overlays)
-+ run_pass_network (main.py).
-"""
+"""Pass network: collaboration aggregation, overlays, and the PASS_NETWORK runner."""
 
 from __future__ import annotations
 

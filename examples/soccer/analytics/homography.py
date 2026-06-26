@@ -667,7 +667,7 @@ _SPORTS_RADAR_COLORS = [
     sv.Color.from_hex("#FF1493"),
 ]
 # ---------------------------------------------------------------------------
-# Pass analytics homography helpers (ported from world_cup)
+# Pass analytics homography helpers
 # ---------------------------------------------------------------------------
 
 def pitch_layout_reliable(
