@@ -7,10 +7,7 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from analytics.modes.pass_alternatives import PassEvent
-    from analytics.player_motion import (
-        JoystickDotSmoother,
-        KalmanSpeedDisplaySmoother,
-    )
+    from analytics.player_motion import JoystickDotSmoother
 
 import cv2
 import numpy as np
@@ -33,13 +30,7 @@ from analytics.pass_imports import image_to_pitch_m, pitch_attack_direction
 from analytics.pass_imports import PassOption, ball_xy, feet_xy, player_mask
 from analytics.class_ids import ROLE_GOALKEEPER, ROLE_PLAYER
 from analytics.draw_helpers import cv2_safe_text, draw_text_shadow
-from analytics.player_motion import (
-    _dot_radius_for_ellipse,
-    _joystick_dot_reach,
-    draw_speed_badge,
-    kalman_speed_stick,
-    player_ellipse_geometry,
-)
+from analytics.player_motion import draw_joystick_dots
 
 ROBOFLOW_PURPLE = sv.Color.from_hex("#8315F9")
 ROBOFLOW_PURPLE_BGR = ROBOFLOW_PURPLE.as_bgr()
@@ -50,7 +41,6 @@ TEAM_COLORS = [
 ]
 TEAM_PALETTE = sv.ColorPalette(TEAM_COLORS)
 BALL_COLOR = sv.Color.from_hex("#FFD700")
-KALMAN_FACING_BGR = (0, 200, 255)
 
 _ELLIPSE = sv.EllipseAnnotator(
     color=TEAM_PALETTE, color_lookup=sv.ColorLookup.CLASS, thickness=2
@@ -146,128 +136,6 @@ def draw_branding_tag(frame: np.ndarray, text: str = "powered by trackers") -> n
 
 
 
-def draw_kalman_joystick_dots(
-    frame: np.ndarray,
-    dets: sv.Detections,
-    *,
-    min_speed_px: float = 0.5,
-    max_speed_px: float = 4.0,
-    dot_smoother: JoystickDotSmoother | None = None,
-    speed_smoother: KalmanSpeedDisplaySmoother | None = None,
-    transformer=None,
-    fps: float = 25.0,
-    show_speed: bool = False,
-    min_speed_ms: float = 0.0,
-    max_speed_labels: int = 0,
-    speed_source: str = "kalman",
-) -> np.ndarray:
-    """PlayStation-style direction dot on each player ellipse from Kalman velocity."""
-    if len(dets) == 0 or dets.data is None:
-        return frame
-    kf_vx = dets.data.get("kf_vx")
-    kf_vy = dets.data.get("kf_vy")
-    if kf_vx is None or kf_vy is None:
-        return frame
-
-    pmask = np.isin(dets.class_id, (ROLE_PLAYER, ROLE_GOALKEEPER))
-    if not pmask.any():
-        return frame
-
-    from analytics.pass_imports import feet_xy
-    from analytics.player_motion import kalman_ground_speed_m_s
-
-    feet = feet_xy(dets) if show_speed else None
-    teams = dets.data.get("team", np.full(len(dets), -1))
-    tids = dets.tracker_id if dets.tracker_id is not None else np.full(len(dets), -1, dtype=int)
-    speed_badges: list[
-        tuple[float, int, int, int, int, int, float, float, tuple[int, int, int]]
-    ] = []
-    for i in np.flatnonzero(pmask):
-        team = int(teams[i])
-        if team not in (0, 1):
-            continue
-        cx, cy, a, b = player_ellipse_geometry(dets.xyxy[i])
-        radius = _dot_radius_for_ellipse(a)
-        vx, vy = float(kf_vx[i]), float(kf_vy[i])
-        speed_px = 0.0
-        if not np.isfinite(vx) or not np.isfinite(vy):
-            px, py = cx, cy
-        else:
-            speed_px = float(np.hypot(vx, vy))
-            if speed_px < min_speed_px:
-                px, py = cx, cy
-            else:
-                stick = kalman_speed_stick(
-                    speed_px, min_speed_px=min_speed_px, max_speed_px=max_speed_px
-                )
-                if stick is None:
-                    px, py = cx, cy
-                else:
-                    ux, uy = vx / speed_px, vy / speed_px
-                    reach = _joystick_dot_reach(
-                        stick, a, b, ux, uy, dot_radius=float(radius)
-                    )
-                    px, py = cx + ux * reach, cy + uy * reach
-        if dot_smoother is not None:
-            px, py = dot_smoother.smooth(
-                int(tids[i]), float(cx), float(cy), float(px), float(py)
-            )
-        else:
-            px, py = int(px), int(py)
-        dot_color = TEAM_COLORS[team].as_bgr()
-        cv2.circle(frame, (px, py), radius, dot_color, -1, cv2.LINE_AA)
-        if show_speed:
-            if speed_source == "multilag":
-                speed_arr = dets.data.get("speed_ms") if dets.data else None
-                speed_m_s = (
-                    float(speed_arr[i])
-                    if speed_arr is not None and np.isfinite(speed_arr[i])
-                    else 0.0
-                )
-                if speed_smoother is not None:
-                    speed_m_s = speed_smoother.smooth(int(tids[i]), speed_m_s)
-            elif feet is not None:
-                if np.isfinite(vx) and np.isfinite(vy):
-                    speed_m_s = kalman_ground_speed_m_s(
-                        feet[i],
-                        np.array([vx, vy], dtype=np.float64),
-                        transformer,
-                        fps=fps,
-                    )
-                else:
-                    speed_m_s = 0.0
-                if speed_m_s is not None and speed_smoother is not None:
-                    speed_m_s = speed_smoother.smooth(int(tids[i]), speed_m_s)
-                elif speed_m_s is None:
-                    speed_m_s = 0.0
-            else:
-                speed_m_s = 0.0
-            if speed_m_s >= min_speed_ms:
-                speed_badges.append(
-                    (speed_m_s, cx, cy, px, py, radius, vx, vy, dot_color)
-                )
-
-    if show_speed and speed_badges:
-        if max_speed_labels > 0:
-            speed_badges.sort(key=lambda item: item[0], reverse=True)
-            speed_badges = speed_badges[:max_speed_labels]
-        for speed_m_s, cx, cy, px, py, radius, vx, vy, color in speed_badges:
-            draw_speed_badge(
-                frame,
-                speed_m_s,
-                float(cx),
-                float(cy),
-                px,
-                py,
-                vx,
-                vy,
-                team_bgr=color,
-                dot_radius=radius,
-                min_speed_px=min_speed_px,
-            )
-    return frame
-
-
 def _tracker_id_labels(dets: sv.Detections) -> list[str]:
     n = len(dets)
     tids = dets.tracker_id if dets.tracker_id is not None else np.full(n, -1, dtype=int)
@@ -279,10 +147,7 @@ def annotate_players(
     dets: sv.Detections,
     *,
     labels: list[str] | None = None,
-    facing: np.ndarray | None = None,
-    facing_motion: np.ndarray | None = None,
-    facing_kalman: np.ndarray | None = None,
-    show_kalman_joystick: bool = False,
+    show_joystick_dots: bool = False,
     dot_smoother: JoystickDotSmoother | None = None,
     show_tracker_ids: bool = False,
 ) -> np.ndarray:
@@ -333,8 +198,8 @@ def annotate_players(
                     frame, gk_vis, labels=_tracker_id_labels(gk_neutral)
                 )
 
-    if show_kalman_joystick:
-        frame = draw_kalman_joystick_dots(frame, dets, dot_smoother=dot_smoother)
+    if show_joystick_dots:
+        draw_joystick_dots(frame, dets, dot_smoother)
     return frame
 
 
@@ -1153,10 +1018,7 @@ def draw_pass_overlay(
     debug_pitch_keypoints: bool = False,
     revealed_options: int | None = None,
     reveal_progress: float = 1.0,
-    facing: np.ndarray | None = None,
-    facing_motion: np.ndarray | None = None,
-    facing_kalman: np.ndarray | None = None,
-    show_kalman_joystick: bool = False,
+    show_joystick_dots: bool = False,
     dot_smoother=None,
 ) -> np.ndarray:
     """Dim the frame and draw ranked pass arrows from the carrier.
@@ -1198,10 +1060,7 @@ def draw_pass_overlay(
     dim = annotate_players(
         dim,
         dets,
-        facing=facing,
-        facing_motion=facing_motion,
-        facing_kalman=facing_kalman,
-        show_kalman_joystick=show_kalman_joystick,
+        show_joystick_dots=show_joystick_dots,
         dot_smoother=dot_smoother,
         show_tracker_ids=True,
     )

@@ -281,14 +281,14 @@ def _annotate_live(
     radar_transformer: Any | None = None,
     locked_goal_defenders: tuple[int, int] | None = None,
     debug_pitch_keypoints: bool = False,
-    show_kalman_joystick: bool = False,
+    show_joystick_dots: bool = False,
     dot_smoother: JoystickDotSmoother | None = None,
 ) -> np.ndarray:
     """Live (non-freeze) frame: players + ball + carrier halo + radar minimap."""
     frame = annotate_players(
         frame,
         dets,
-        show_kalman_joystick=show_kalman_joystick,
+        show_joystick_dots=show_joystick_dots,
         dot_smoother=dot_smoother,
         show_tracker_ids=True,
     )
@@ -447,7 +447,7 @@ def _render_pass_alternatives(args, analysis: ClipAnalysis) -> None:
                 radar_transformer=transformer,
                 locked_goal_defenders=locked_goals,
                 debug_pitch_keypoints=debug_pitch_keypoints,
-                show_kalman_joystick=True,
+                show_joystick_dots=True,
                 dot_smoother=dot_smoother,
             )
             frames_until = next(
@@ -496,7 +496,7 @@ def _render_pass_alternatives(args, analysis: ClipAnalysis) -> None:
                             event,
                             revealed_options=revealed,
                             reveal_progress=progress,
-                            show_kalman_joystick=True,
+                            show_joystick_dots=True,
                             dot_smoother=dot_smoother,
                             **overlay_kwargs,
                         )
