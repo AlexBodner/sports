@@ -82,12 +82,6 @@ from .pass_options import (
     score_pass_options,
     top_pass_options,
 )
-from .carrier import (
-    CarrierFrameState,
-    CarrierTrackingConfig,
-    build_carrier_timeline,
-)
-
 DetectionIterator = Iterator[tuple[int, sv.Detections]]
 
 
@@ -218,26 +212,6 @@ class PassDetectionConfig:
             ball_speed_min_lookback_frames=self.ball_speed_min_lookback_frames,
             gravity_flyby_min_release_gap_frames=self.adjacent_pass_max_gap_frames,
         )
-
-    def tracking_config(self) -> CarrierTrackingConfig:
-        return CarrierTrackingConfig(
-            control_max_distance_m=self.control_max_distance_m,
-            control_max_distance_px=self.control_max_distance_px,
-            reception_max_distance_m=self.reception_max_distance_m,
-            reception_max_distance_px=self.reception_max_distance_px,
-            min_pass_gap_frames=self.min_carrier_gap_frames,
-            max_pass_gap_frames=self.max_pass_gap_frames,
-            min_arrival_frames=self.min_arrival_frames,
-            min_reception_arrival_frames=self.min_reception_arrival_frames,
-            min_arrival_control_frames=self.min_arrival_control_frames,
-            min_control_frames=self.min_control_frames,
-            min_gk_control_frames=self.min_gk_control_frames,
-            pre_flight_release_window=self.pre_flight_release_window,
-            adjacent_pass_max_gap_frames=self.adjacent_pass_max_gap_frames,
-            aerial_dy_threshold_px=self.aerial_dy_threshold_px,
-            missing_ball_tolerance=self.missing_ball_tolerance,
-        )
-
 
 @dataclass(frozen=True)
 class InferredPass:

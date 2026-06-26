@@ -25,7 +25,6 @@ from analytics.passing import (
     Carrier,
     PassOption,
     PassWeights,
-    TrackPositionHistory,
     ball_xy,
     bbox_center_xy,
     find_control_carrier,
@@ -331,7 +330,6 @@ def plan_pass_events(
     max_m = weights.freeze_carrier_max_distance_m
     require_both = weights.freeze_require_both_spaces
 
-    history = TrackPositionHistory()
     ball_history = BallPositionHistory()
     candidates: list[PassEvent] = []
     instant_speed_by_frame: dict[int, float] = {}
@@ -342,13 +340,6 @@ def plan_pass_events(
             transformers, frame_idx, kps, pitch_confidence=pitch_confidence
         )
         ball_history.record(frame_idx, ball_xy(dets))
-        feet_img = feet_xy(dets)
-        hist_xy = feet_img
-        if transformer is not None:
-            pitch_feet = image_to_pitch_m(feet_img, transformer)
-            if pitch_feet is not None:
-                hist_xy = pitch_feet
-        history.record_frame(frame_idx, dets, hist_xy)
 
         carrier = find_control_carrier(
             dets,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .ball import attach_ball, create_ball_detector
-from .carrier import BallPositionHistory, TrackPositionHistory
+from .carrier import BallPositionHistory
 from .pass_options import (
     PassOption,
     PassWeights,
@@ -43,7 +43,6 @@ __all__ = [
     "PassQualityScorer",
     "PassWeights",
     "PossessionScanResult",
-    "TrackPositionHistory",
     "attach_ball",
     "ball_xy",
     "bbox_center_xy",
