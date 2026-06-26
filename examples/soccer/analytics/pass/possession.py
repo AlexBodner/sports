@@ -263,14 +263,25 @@ class TouchValidationConfig:
 
 
 def nearest_player_tid(dets: sv.Detections, ball: np.ndarray) -> int | None:
+    found = nearest_player_feet(dets, ball)
+    return found[0] if found is not None else None
+
+
+def nearest_player_feet(
+    dets: sv.Detections, ball: np.ndarray,
+) -> tuple[int, float] | None:
+    """Return ``(tracker_id, feet distance px)`` for the closest outfield player."""
     pmask = player_mask(dets)
     if not pmask.any() or dets.tracker_id is None:
         return None
     feet = feet_xy(dets)[pmask]
     tids = dets.tracker_id[pmask]
     dist = np.hypot(feet[:, 0] - ball[0], feet[:, 1] - ball[1])
-    tid = int(tids[int(np.argmin(dist))])
-    return tid if tid >= 0 else None
+    local = int(np.argmin(dist))
+    tid = int(tids[local])
+    if tid < 0:
+        return None
+    return tid, float(dist[local])
 
 
 def is_aerial_touch(

@@ -662,13 +662,7 @@ class MetricContext:
         return cache[key]
 
 
-_SPORTS_RADAR_COLORS = [
-    sv.Color.from_hex("#00BFFF"),
-    sv.Color.from_hex("#FF1493"),
-]
-# ---------------------------------------------------------------------------
 # Pass analytics homography helpers
-# ---------------------------------------------------------------------------
 
 def pitch_layout_reliable(
     pitch_xy_m: np.ndarray,
@@ -722,6 +716,7 @@ def render_radar(
     from analytics.class_ids import (
         GOALKEEPER_CLASS_ID as ROLE_GOALKEEPER,
         PLAYER_CLASS_ID as ROLE_PLAYER,
+        TEAM_COLORS,
         TEAM_LEFT,
         TEAM_RIGHT,
     )
@@ -769,7 +764,7 @@ def render_radar(
             config,
             left_defender_team=left_team,
             right_defender_team=right_team,
-            team_colors=_SPORTS_RADAR_COLORS,
+            team_colors=TEAM_COLORS,
             pitch=radar,
         )
     elif not has_players:
@@ -778,7 +773,7 @@ def render_radar(
             config,
             left_defender_team=left_team,
             right_defender_team=right_team,
-            team_colors=_SPORTS_RADAR_COLORS,
+            team_colors=TEAM_COLORS,
             pitch=radar,
         )
 
@@ -789,7 +784,7 @@ def render_radar(
 
     if feet_cm is not None and teams is not None and outfield_mask.any():
         on_pitch = valid_pitch_cm(feet_cm, config, margin_cm=80.0)
-        for team_id, color in enumerate(_SPORTS_RADAR_COLORS[:2]):
+        for team_id, color in enumerate(TEAM_COLORS[:2]):
             team_mask = (teams == team_id) & on_pitch
             if not team_mask.any():
                 continue
@@ -807,7 +802,7 @@ def render_radar(
             "team", np.full(int(gk_mask.sum()), -1, dtype=int)
         )
         on_pitch = valid_pitch_cm(gk_feet_cm, config, margin_cm=80.0)
-        for team_id, color in enumerate(_SPORTS_RADAR_COLORS[:2]):
+        for team_id, color in enumerate(TEAM_COLORS[:2]):
             team_mask = (gk_teams == team_id) & on_pitch
             if not team_mask.any():
                 continue

@@ -28,36 +28,16 @@ from analytics.homography import (
 )
 from analytics.pass_imports import image_to_pitch_m, pitch_attack_direction
 from analytics.pass_imports import PassOption, ball_xy, feet_xy, player_mask
-from analytics.class_ids import ROLE_GOALKEEPER, ROLE_PLAYER
+from analytics.class_ids import ROLE_GOALKEEPER, ROLE_PLAYER, TEAM_COLORS
 from analytics.draw_helpers import cv2_safe_text, draw_text_shadow
 from analytics.player_motion import draw_joystick_dots
 
 ROBOFLOW_PURPLE = sv.Color.from_hex("#8315F9")
 ROBOFLOW_PURPLE_BGR = ROBOFLOW_PURPLE.as_bgr()
-TEAM_COLORS = [
-    sv.Color.from_hex("#00BFFF"),
-    sv.Color.from_hex("#FF1493"),
-    sv.Color.from_hex("#FFD700"),
-]
-TEAM_PALETTE = sv.ColorPalette(TEAM_COLORS)
 BALL_COLOR = sv.Color.from_hex("#FFD700")
 
-_ELLIPSE = sv.EllipseAnnotator(
-    color=TEAM_PALETTE, color_lookup=sv.ColorLookup.CLASS, thickness=2
-)
-_LABEL = sv.LabelAnnotator(
-    text_position=sv.Position.BOTTOM_CENTER,
-    text_scale=0.45,
-    text_thickness=1,
-    border_radius=4,
-    color=TEAM_PALETTE,
-    color_lookup=sv.ColorLookup.CLASS,
-)
 _BALL_TRI = sv.TriangleAnnotator(
     color=BALL_COLOR, base=14, height=18, color_lookup=sv.ColorLookup.INDEX
-)
-_GK_ELLIPSE = sv.EllipseAnnotator(
-    color=sv.Color.from_hex("#E8E8E8"), thickness=2
 )
 
 
@@ -91,10 +71,6 @@ _TRACK_LABEL = sv.LabelAnnotator(
     color=_TRACK_ID_PALETTE,
     color_lookup=sv.ColorLookup.TRACK,
 )
-
-
-def team_class_ids(teams: np.ndarray) -> np.ndarray:
-    return np.where(np.isin(teams, (0, 1)), teams, 2).astype(int)
 
 
 def draw_hud_bar(frame: np.ndarray, title: str, *, height: int = 44) -> np.ndarray:
@@ -136,12 +112,6 @@ def draw_branding_tag(frame: np.ndarray, text: str = "powered by trackers") -> n
 
 
 
-def _tracker_id_labels(dets: sv.Detections) -> list[str]:
-    n = len(dets)
-    tids = dets.tracker_id if dets.tracker_id is not None else np.full(n, -1, dtype=int)
-    return [f"#{int(tid)}" if int(tid) >= 0 else "" for tid in tids]
-
-
 def annotate_players(
     frame: np.ndarray,
     dets: sv.Detections,
@@ -151,53 +121,14 @@ def annotate_players(
     dot_smoother: JoystickDotSmoother | None = None,
     show_tracker_ids: bool = False,
 ) -> np.ndarray:
-    outfield = dets[dets.class_id == ROLE_PLAYER]
-    if len(outfield):
-        teams = outfield.data.get("team", np.zeros(len(outfield)))
-        outfield_vis = sv.Detections(
-            xyxy=outfield.xyxy,
-            class_id=team_class_ids(teams),
-            tracker_id=outfield.tracker_id,
-            data=outfield.data,
-        )
-        frame = _ELLIPSE.annotate(frame, outfield_vis)
-        player_labels = labels
-        if player_labels is None and show_tracker_ids:
-            player_labels = _tracker_id_labels(outfield)
-        if player_labels is not None:
-            frame = _LABEL.annotate(frame, outfield_vis, labels=player_labels)
+    del labels  # reserved; tracker ids come from detections when show_tracker_ids
+    from analytics.player_motion import draw_team_ellipses
 
-    gks = dets[dets.class_id == ROLE_GOALKEEPER]
-    if len(gks):
-        gk_teams = gks.data.get("team", np.full(len(gks), -1))
-        has_team = np.isin(gk_teams, (0, 1))
-        if has_team.any():
-            gk_colored = gks[has_team]
-            gk_vis = sv.Detections(
-                xyxy=gk_colored.xyxy,
-                class_id=team_class_ids(gk_teams[has_team]),
-                tracker_id=gk_colored.tracker_id,
-                data=gk_colored.data,
-            )
-            frame = _ELLIPSE.annotate(frame, gk_vis)
-            if show_tracker_ids:
-                frame = _LABEL.annotate(
-                    frame, gk_vis, labels=_tracker_id_labels(gk_colored)
-                )
-        if (~has_team).any():
-            gk_neutral = gks[~has_team]
-            frame = _GK_ELLIPSE.annotate(frame, gk_neutral)
-            if show_tracker_ids:
-                gk_vis = sv.Detections(
-                    xyxy=gk_neutral.xyxy,
-                    class_id=np.zeros(len(gk_neutral), dtype=int),
-                    tracker_id=gk_neutral.tracker_id,
-                    data=gk_neutral.data,
-                )
-                frame = _LABEL.annotate(
-                    frame, gk_vis, labels=_tracker_id_labels(gk_neutral)
-                )
-
+    frame = draw_team_ellipses(
+        frame, dets,
+        show_ids=show_tracker_ids,
+        use_label_annotator=show_tracker_ids,
+    )
     if show_joystick_dots:
         draw_joystick_dots(frame, dets, dot_smoother)
     return frame
@@ -213,15 +144,6 @@ def annotate_ball(frame: np.ndarray, dets: sv.Detections) -> np.ndarray:
         class_id=np.array([0]),
     )
     return _BALL_TRI.annotate(frame, ball_dets)
-
-
-def _valid_pitch_cm(
-    xy: np.ndarray, config=PITCH_CONFIG, *, margin_cm: float = 200.0
-) -> np.ndarray:
-    """Mask for points that lie on the pitch (homography outliers are dropped)."""
-    from analytics.homography import valid_pitch_cm
-
-    return valid_pitch_cm(xy, config, margin_cm=margin_cm)
 
 
 def draw_radar_minimap(

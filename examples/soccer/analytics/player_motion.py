@@ -29,9 +29,14 @@ except ImportError:
 from analytics.class_ids import (
     BALL_CLASS_ID,
     GOALKEEPER_CLASS_ID,
+    NEUTRAL_COLOR,
     PLAYER_CLASS_ID,
     REFEREE_CLASS_ID,
+    REFEREE_COLOR,
+    TEAM_COLORS,
     TEAM_NONE,
+    TEAM_VIS_PALETTE,
+    team_vis_class_ids,
 )
 from analytics.draw_helpers import draw_text_shadow
 from analytics.homography import keypoints_from_inference_field, valid_pitch_cm
@@ -758,12 +763,22 @@ def fit_team_classifier(
 
 
 # ---------------------------------------------------------------------------
-# Annotation helpers
+# Annotation helpers (supervision ellipses + custom chips / badges)
 # ---------------------------------------------------------------------------
 
-TEAM_COLORS = [sv.Color.from_hex("#FF1493"), sv.Color.from_hex("#00BFFF")]
-REFEREE_COLOR = sv.Color.from_hex("#FFD700")
-NEUTRAL_COLOR = sv.Color.from_hex("#CCCCCC")
+_TEAM_ELLIPSE = sv.EllipseAnnotator(
+    color=TEAM_VIS_PALETTE, color_lookup=sv.ColorLookup.CLASS, thickness=2,
+)
+_REFEREE_ELLIPSE = sv.EllipseAnnotator(color=REFEREE_COLOR, thickness=2)
+_NEUTRAL_GK_ELLIPSE = sv.EllipseAnnotator(color=NEUTRAL_COLOR, thickness=2)
+_TRACK_LABEL = sv.LabelAnnotator(
+    text_position=sv.Position.BOTTOM_CENTER,
+    text_scale=0.45,
+    text_thickness=1,
+    border_radius=4,
+    color=TEAM_VIS_PALETTE,
+    color_lookup=sv.ColorLookup.CLASS,
+)
 
 MS_TO_KMH = 3.6
 
@@ -774,47 +789,116 @@ def _team_color(team: int) -> sv.Color:
     return NEUTRAL_COLOR
 
 
+def _tracker_id_labels(dets: sv.Detections) -> list[str]:
+    n = len(dets)
+    tids = dets.tracker_id if dets.tracker_id is not None else np.full(n, -1, dtype=int)
+    return [f"#{int(tid)}" if int(tid) >= 0 else "" for tid in tids]
+
+
 def draw_team_ellipses(
     frame: np.ndarray,
     detections: sv.Detections,
     *,
     thickness: int = 2,
-    show_ids: bool = True,
-) -> None:
-    """Draw ground-contact ellipses colored by team (optional track-id labels)."""
+    show_ids: bool = False,
+    use_label_annotator: bool = False,
+) -> np.ndarray:
+    """Draw team-colored ground ellipses via supervision ``EllipseAnnotator``.
+
+    ``use_label_annotator=True`` (pass modes) uses ``LabelAnnotator`` at the feet.
+    ``show_ids=True`` with ``use_label_annotator=False`` draws compact ``#id`` chips.
+    """
+    del thickness  # EllipseAnnotator thickness fixed at module annotators
     if len(detections) == 0 or detections.data is None:
-        return
-    teams = detections.data.get("team", np.full(len(detections), TEAM_NONE))
-    tids = detections.tracker_id if detections.tracker_id is not None else np.full(len(detections), -1)
+        return frame
+
+    players = detections[detections.class_id == PLAYER_CLASS_ID]
+    if len(players):
+        pl_teams = players.data.get("team", np.zeros(len(players)))
+        pl_vis = sv.Detections(
+            xyxy=players.xyxy,
+            class_id=team_vis_class_ids(pl_teams),
+            tracker_id=players.tracker_id,
+            data=players.data,
+        )
+        frame = _TEAM_ELLIPSE.annotate(frame, pl_vis)
+        if show_ids:
+            if use_label_annotator:
+                frame = _TRACK_LABEL.annotate(
+                    frame, pl_vis, labels=_tracker_id_labels(players),
+                )
+            else:
+                _draw_team_id_chips(frame, players, pl_teams)
+
+    gks = detections[detections.class_id == GOALKEEPER_CLASS_ID]
+    if len(gks):
+        gk_teams = gks.data.get("team", np.full(len(gks), TEAM_NONE))
+        has_team = np.isin(gk_teams, (0, 1))
+        if has_team.any():
+            gk_colored = gks[has_team]
+            gk_vis = sv.Detections(
+                xyxy=gk_colored.xyxy,
+                class_id=team_vis_class_ids(gk_teams[has_team]),
+                tracker_id=gk_colored.tracker_id,
+                data=gk_colored.data,
+            )
+            frame = _TEAM_ELLIPSE.annotate(frame, gk_vis)
+            if show_ids:
+                if use_label_annotator:
+                    frame = _TRACK_LABEL.annotate(
+                        frame, gk_vis, labels=_tracker_id_labels(gk_colored),
+                    )
+                else:
+                    _draw_team_id_chips(frame, gk_colored, gk_teams[has_team])
+        if (~has_team).any():
+            gk_neutral = gks[~has_team]
+            frame = _NEUTRAL_GK_ELLIPSE.annotate(frame, gk_neutral)
+            if show_ids:
+                if use_label_annotator:
+                    gk_vis = sv.Detections(
+                        xyxy=gk_neutral.xyxy,
+                        class_id=np.zeros(len(gk_neutral), dtype=int),
+                        tracker_id=gk_neutral.tracker_id,
+                        data=gk_neutral.data,
+                    )
+                    frame = _TRACK_LABEL.annotate(
+                        frame, gk_vis, labels=_tracker_id_labels(gk_neutral),
+                    )
+                else:
+                    _draw_team_id_chips(
+                        frame, gk_neutral, np.full(len(gk_neutral), TEAM_NONE),
+                    )
+
+    refs = detections[detections.class_id == REFEREE_CLASS_ID]
+    if len(refs):
+        frame = _REFEREE_ELLIPSE.annotate(frame, refs)
+
+    return frame
+
+
+def _draw_team_id_chips(
+    frame: np.ndarray,
+    detections: sv.Detections,
+    teams: np.ndarray,
+) -> None:
+    """Compact ``#id`` chips above each ellipse (motion-mode style)."""
+    tids = (
+        detections.tracker_id
+        if detections.tracker_id is not None
+        else np.full(len(detections), -1)
+    )
     for i, xyxy in enumerate(detections.xyxy):
-        class_id = int(detections.class_id[i])
+        tid = int(tids[i])
+        if tid < 0:
+            continue
         team = int(teams[i])
-        if class_id == REFEREE_CLASS_ID:
-            color = REFEREE_COLOR
-        else:
-            color = _team_color(team)
-        x1, y1, x2, y2 = xyxy
-        # Match sv.EllipseAnnotator geometry: feet-centered open arc whose semi-axes
-        # are the full box width and 0.35x that width (not half), so the ground ellipse
-        # sits under the player at the expected visible size.
+        color = _team_color(team) if team in (0, 1) else NEUTRAL_COLOR
+        x1, _y1, x2, y2 = xyxy
         width = float(x2 - x1)
         cx = int((x1 + x2) / 2)
         cy = int(y2)
-        rx = max(int(width), 1)
         ry = max(int(0.35 * width), 1)
-        cv2.ellipse(
-            frame,
-            (cx, cy),
-            (rx, ry),
-            0.0, -45, 235,
-            color.as_bgr(),
-            thickness,
-            cv2.LINE_AA,
-        )
-        tid = int(tids[i])
-        if show_ids and tid >= 0:
-            # Clean id chip (shared badge styling) instead of a raw putText number.
-            _draw_chip(frame, f"#{tid}", (cx, cy - ry - 8), team_bgr=color.as_bgr())
+        _draw_chip(frame, f"#{tid}", (cx, cy - ry - 8), team_bgr=color.as_bgr())
 
 
 # ── radial Kalman speed badge ──
@@ -1402,67 +1486,6 @@ def build_trace_minimap(
                 cv2.circle(radar, (px, py), 8, color, -1, cv2.LINE_AA)
                 cv2.circle(radar, (px, py), 8, (255, 255, 255), 1, cv2.LINE_AA)
     return radar
-
-
-def annotate_motion_overlay(
-    frame: np.ndarray,
-    detections: sv.Detections,
-    *,
-    joystick_smoother: JoystickDotSmoother | None,
-    speed_by_tid: dict[int, float] | None,
-    distance_by_tid: dict[int, float] | None,
-    show_ids: bool = False,
-) -> None:
-    """Draw team ellipses + instant-speed badge + cumulative-distance chip per player.
-
-    The instant Kalman ground speed rides the joystick dot (existing speed badge) and
-    the cumulative-distance chip sits above the player, so the two metric chips stack
-    without overlapping. Shared by DISTANCE and SPEED_AND_DISTANCE so the on-player metric
-    chips look identical across both demos.
-    """
-    draw_team_ellipses(frame, detections, show_ids=show_ids)
-    draw_joystick_dots(
-        frame, detections, joystick_smoother,
-        speed_by_tid=speed_by_tid, show_speed=speed_by_tid is not None,
-    )
-    if distance_by_tid is not None:
-        draw_distance_labels(frame, detections, distance_by_tid)
-
-
-def render_follow_all_frame(
-    frame: np.ndarray,
-    detections: sv.Detections,
-    *,
-    joystick_smoother: JoystickDotSmoother | None,
-    speed_by_tid: dict[int, float] | None,
-    distance_by_tid: dict[int, float] | None,
-    trace_by_tid: dict[int, list[np.ndarray]],
-    radar_transformer: ViewTransformer | None,
-    locked_goal_defenders: tuple[int, int] | None = None,
-    focus_tid: int | None = None,
-    show_legend: bool = True,
-    show_ids: bool = False,
-) -> None:
-    """Annotate every player with speed+distance chips and overlay the trace radar.
-
-    This is the shared "follow-all" look: it backs both SPEED_AND_DISTANCE (no --track-id)
-    and DISTANCE so the two render identically apart from DISTANCE's leaderboard
-    end-card. Mutates ``frame`` in place.
-    """
-    annotate_motion_overlay(
-        frame, detections,
-        joystick_smoother=joystick_smoother,
-        speed_by_tid=speed_by_tid,
-        distance_by_tid=distance_by_tid,
-        show_ids=show_ids,
-    )
-    if show_legend:
-        draw_speed_legend(frame)
-    mini_radar = build_trace_minimap(
-        detections, radar_transformer, trace_by_tid, focus_tid,
-        locked_goal_defenders=locked_goal_defenders,
-    )
-    overlay_minimap(frame, mini_radar)
 
 
 # ---------------------------------------------------------------------------

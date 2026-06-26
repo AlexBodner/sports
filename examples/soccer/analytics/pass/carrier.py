@@ -9,7 +9,7 @@ import supervision as sv
 
 from analytics.geometry import unit
 from analytics.player_motion import player_mask
-from .possession import Carrier
+from .possession import Carrier, nearest_player_feet
 
 
 class TrackPositionHistory:
@@ -254,23 +254,6 @@ class CarrierFrameState:
         return asdict(self)
 
 
-def _nearest_player(
-    dets: sv.Detections,
-    ball: np.ndarray,
-) -> tuple[int, float] | None:
-    pmask = player_mask(dets)
-    if not pmask.any() or dets.tracker_id is None:
-        return None
-    feet = feet_xy(dets)[pmask]
-    tids = dets.tracker_id[pmask]
-    dist = np.hypot(feet[:, 0] - ball[0], feet[:, 1] - ball[1])
-    local = int(np.argmin(dist))
-    tid = int(tids[local])
-    if tid < 0:
-        return None
-    return tid, float(dist[local])
-
-
 def _carrier_at_threshold(
     dets: sv.Detections,
     *,
@@ -375,7 +358,7 @@ def build_carrier_timeline(
             missing_ball_streak += 1
         else:
             missing_ball_streak = 0
-        nearest = _nearest_player(dets, ball) if ball is not None else None
+        nearest = nearest_player_feet(dets, ball) if ball is not None else None
 
         control = (
             _carrier_at_threshold(
