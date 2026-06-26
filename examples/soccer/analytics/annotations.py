@@ -26,8 +26,8 @@ from analytics.homography import (
     pitch_keypoint_confidence,
     render_radar,
 )
-from analytics.pass_imports import image_to_pitch_m, pitch_attack_direction
-from analytics.pass_imports import PassOption, ball_xy, feet_xy, player_mask
+from analytics.passing import PassOption, ball_xy, image_to_pitch_m, pitch_attack_direction
+from analytics.player_motion import feet_xy, player_mask
 from analytics.class_ids import ROLE_GOALKEEPER, ROLE_PLAYER, TEAM_COLORS
 from analytics.draw_helpers import cv2_safe_text, draw_text_shadow
 from analytics.player_motion import draw_joystick_dots
@@ -895,7 +895,7 @@ def _options_with_lane_debug(
     pitch_cm: np.ndarray | None = None,
 ) -> list[PassOption]:
     """Re-score if needed so freeze frames always carry pitch corridor geometry."""
-    from analytics.pass_imports import PassWeights, bbox_center_xy, remap_lane_debug_to_pitch_cm, top_pass_options
+    from analytics.passing import PassWeights, bbox_center_xy, remap_lane_debug_to_pitch_cm, top_pass_options
 
     if event.options and all(o.lane_debug is not None for o in event.options):
         return event.options
@@ -949,7 +949,7 @@ def draw_pass_overlay(
     ``reveal_progress``: 0-1 animation within the current reveal phase.
     """
     from analytics.homography import homography_from_keypoints_radar
-    from analytics.pass_imports import PassWeights, remap_lane_debug_to_pitch_cm
+    from analytics.passing import PassWeights, remap_lane_debug_to_pitch_cm
 
     if weights is None:
         weights = PassWeights()

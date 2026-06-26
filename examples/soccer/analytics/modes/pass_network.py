@@ -18,7 +18,7 @@ from analytics.annotations import (
     draw_radar_minimap,
 )
 from analytics.clip_pipeline import ClipAnalysis, compute_clip_analysis, _clip_stem
-from analytics.pass_imports import InferredPass, InferredTurnover
+from analytics.passing import InferredPass, InferredTurnover
 
 
 @dataclass(frozen=True)
@@ -195,8 +195,8 @@ from analytics.annotations import (
     draw_text_shadow,
     ease_out_cubic,
 )
-from analytics.pass_imports import ball_xy, feet_xy, passes_for_overlay
-from analytics.player_motion import open_video
+from analytics.passing import ball_xy, passes_for_overlay
+from analytics.player_motion import feet_xy, open_video
 
 TEAM_COLORS_BGR = [c.as_bgr() for c in TEAM_COLORS[:2]]
 NEUTRAL_BGR = (200, 200, 200)
@@ -735,7 +735,7 @@ def _render_pass_network(args, analysis: ClipAnalysis) -> None:
     """Render pass network overlay using a shared :class:`ClipAnalysis`."""
     from analytics.annotations import draw_pass_overlay
     from analytics.modes.pass_alternatives import PassEvent
-    from analytics.pass_imports import carrier_from_tracker_id, find_control_carrier
+    from analytics.passing import carrier_from_tracker_id, find_control_carrier
 
     metric = analysis.metric
     locks = analysis.locks("goal_distance")
