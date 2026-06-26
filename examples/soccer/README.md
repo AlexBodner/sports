@@ -12,7 +12,7 @@ pip install -r requirements.txt
 ./setup.sh
 ```
 
-`setup.sh` downloads demo clips and three YOLO weights into `data/`, including
+`setup.sh` downloads demo clips and model weights into `data/`, including
 `football-ball-detection.pt` (required for pass analytics). Model weights and
 rendered MP4s are gitignored — run `./setup.sh` locally rather than committing them.
 
@@ -116,9 +116,9 @@ on the field.
 
 ### player-motion analytics
 
-Seven analytics modes overlay player speed, direction, distance, spotlight
-tracking, and pass visualization on the broadcast view. They share one tracking
-pass per run and reuse the same detectors as the modes above (YOLO by default).
+Seven analytics modes overlay player speed, direction, distance, single-player
+speed and distance, and pass visualization on the broadcast view. They share one tracking
+pass per run and reuse the same detectors as the modes above.
 Pass modes additionally require the ball detection model from `setup.sh`
 (`data/football-ball-detection.pt`).
 
@@ -149,8 +149,8 @@ Pass modes additionally require the ball detection model from `setup.sh`
   ```
 
 - `SPEED_AND_DISTANCE` — Per-player speed and cumulative distance overlay with
-  radar traces. Spotlight one tracked player with `--track-id`, or omit it to
-  annotate all players.
+  radar traces. Use `--track-id` to show speed and distance for one player, or omit
+  it to annotate all players.
 
   ```bash
   python main.py --source_video_path data/2e57b9_0.mp4 \
@@ -181,8 +181,8 @@ Pass modes additionally require the ball detection model from `setup.sh`
 
 - `ALL` — Run-all orchestrator: computes shared tracking, homography, kinematics,
   and pass scan once, then writes **seven** analytics renders (direction, speed,
-  distance, speed-and-distance for all players, a single-player spotlight,
-  pass-network, and pass-alternatives).
+  distance, speed-and-distance for all players, speed-and-distance for one player
+  (`--track-id`), pass-network, and pass-alternatives).
 
   ```bash
   python main.py --source_video_path data/2e57b9_0.mp4 \
@@ -201,12 +201,12 @@ modes):
 | `--tracker` | `botsort` | Tracker backend: `botsort`, `bytetrack`, or `botsort_nocmc` |
 | `--player-detector` | `yolo` | Player detection: `yolo` or `inference` (Roboflow) |
 | `--pitch-detector` | `yolo` | Pitch keypoints: `yolo` or `inference` (Roboflow) |
-| `--track-id` | *(none)* | `SPEED_AND_DISTANCE` / `ALL`: spotlight this tracker id |
+| `--track-id` | *(none)* | `SPEED_AND_DISTANCE` / `ALL`: show speed and distance for this tracker id |
 | `--show-track-ids` | off | `SPEED`: show tracker ID chips on players (with speed badges) |
 | `--show-predictions` | off | `PASS_NETWORK`: freeze and reveal top pass alternatives at pass moments |
 | `--freeze-quality-threshold` | `0.0` | `PASS_NETWORK`: min pass quality score for prediction freeze |
-| `--player-model-path` | *(bundled YOLO)* | Override YOLO player `.pt` path |
-| `--pitch-model-path` | *(bundled YOLO)* | Override YOLO pitch `.pt` path |
+| `--player-model-path` | *(bundled `.pt`)* | Override local player detection weights path |
+| `--pitch-model-path` | *(bundled `.pt`)* | Override local pitch keypoint weights path |
 | `--player-model-id` | Roboflow id | Inference player model id |
 | `--pitch-model-id` | Roboflow id | Inference pitch model id |
 | `--api-key` | env `ROBOFLOW_API_KEY` | Roboflow API key for `--*-detector inference` |
