@@ -24,11 +24,15 @@ from sports.common.team import TeamClassifier
 from sports.common.view import ViewTransformer
 from sports.configs.soccer import SoccerPitchConfiguration
 
-from analytics.direction import run_direction
-from analytics.distance import run_distance
-from analytics.speed_and_distance import run_speed_and_distance
-from analytics.run_all import run_all
-from analytics.speed import run_speed
+from analytics import (
+    run_all,
+    run_direction,
+    run_distance,
+    run_pass_alternatives,
+    run_pass_network,
+    run_speed,
+    run_speed_and_distance,
+)
 
 from analytics.class_ids import (
     BALL_CLASS_ID,
@@ -102,6 +106,8 @@ class Mode(Enum):
     SPEED = 'SPEED'
     DISTANCE = 'DISTANCE'
     SPEED_AND_DISTANCE = 'SPEED_AND_DISTANCE'
+    PASS_NETWORK = 'PASS_NETWORK'
+    PASS_ALTERNATIVES = 'PASS_ALTERNATIVES'
     # In-process orchestrator: compute the shared pipeline once, render all of the above.
     ALL = 'ALL'
 
@@ -114,6 +120,8 @@ ANALYTICS_MODES = (
     Mode.SPEED,
     Mode.DISTANCE,
     Mode.SPEED_AND_DISTANCE,
+    Mode.PASS_NETWORK,
+    Mode.PASS_ALTERNATIVES,
     Mode.ALL,
 )
 
@@ -128,6 +136,10 @@ def run_analytics_mode(mode: Mode, args: argparse.Namespace) -> None:
         run_distance(args)
     elif mode == Mode.SPEED_AND_DISTANCE:
         run_speed_and_distance(args)
+    elif mode == Mode.PASS_NETWORK:
+        run_pass_network(args)
+    elif mode == Mode.PASS_ALTERNATIVES:
+        run_pass_alternatives(args)
     elif mode == Mode.ALL:
         run_all(args)
     else:
@@ -508,6 +520,12 @@ if __name__ == '__main__':
                         help='(analytics, SPEED_AND_DISTANCE) Spotlight one tracker id; omit to follow all')
     parser.add_argument('--show-track-ids', dest='show_track_ids', action='store_true',
                         help='(analytics, SPEED) Show tracker ID chips on players (combine with speed badges)')
+    parser.add_argument('--show-predictions', dest='show_predictions', action='store_true',
+                        help='(analytics, PASS_NETWORK) Freeze on detected passes and reveal top pass alternatives')
+    parser.add_argument('--freeze-quality-threshold', dest='freeze_quality_threshold',
+                        type=float, default=0.0,
+                        help='(analytics, PASS_NETWORK) Minimum pass quality score to trigger '
+                             'prediction freeze when --show-predictions is set (default: 0.0)')
     parser.add_argument('--cache', dest='cache', action=argparse.BooleanOptionalAction,
                         default=True,
                         help='(analytics) Cache per-frame detections + pitch keypoints on disk '

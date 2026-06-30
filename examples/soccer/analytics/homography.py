@@ -15,6 +15,7 @@ import numpy.typing as npt
 import supervision as sv
 
 from sports.common.view import ViewTransformer
+from sports.annotators.soccer import draw_pitch, draw_points_on_pitch
 from sports.configs.soccer import SoccerPitchConfiguration
 
 # ── constants ──────────────────────────────────────────────────────────────────
@@ -235,7 +236,6 @@ def _players_on_pitch_score(
     keeps the two teams horizontally separated; a mirrored one tends to throw players
     off-pitch. Team separation is only used when team ids are present on ``detections``.
     """
-    # player_motion imports homography at import time; defer to avoid a cycle.
     from analytics.player_motion import feet_xy, player_mask
 
     pmask = player_mask(detections)
@@ -352,6 +352,49 @@ def build_radar_homography_map(
     ``radar_transforms`` / ``speed_transforms``.
     """
     return metric.keypoint_radar_transforms(confidence)
+
+
+def view_transformer_from_keypoints(
+    keypoints: sv.KeyPoints | None,
+    config: SoccerPitchConfiguration = PITCH_CONFIG,
+    confidence: float = 0.9,
+    *,
+    use_ransac: bool = True,
+    ransac_thresh: float = HOMOGRAPHY_RANSAC_REPROJ_THRESH,
+    orientation_anchor: ViewTransformer | None = None,
+) -> ViewTransformer | None:
+    """Per-frame H from keypoints (plain + mirrored candidates, lowest reproj wins)."""
+    if keypoints is None or keypoints.xy.shape[0] == 0:
+        return None
+    n = pitch_vertex_count(config)
+    xy, conf = align_pitch_keypoints(keypoints, n_vertices=n)
+    mask = pitch_keypoint_accept_mask(xy, conf, confidence=confidence)
+    if mask.sum() < DISPLAY_MIN_KEYPOINTS:
+        return None
+    src = xy[mask].astype(np.float32)
+    dst = np.array(config.vertices, dtype=np.float32)[mask]
+    length = float(config.length)
+    candidates: list[tuple[float, ViewTransformer]] = []
+    for target in (dst, _flip_pitch_x_targets(dst, length)):
+        try:
+            t = RansacViewTransformer(
+                source=src,
+                target=target,
+                use_ransac=use_ransac,
+                ransac_thresh=ransac_thresh,
+            )
+        except ValueError:
+            continue
+        candidates.append((_mean_reproj_px(t, src, target), t))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda pair: pair[0])
+    for _err, t in candidates:
+        if orientation_anchor is None or _orientation_matches_anchor(
+            t, orientation_anchor, src
+        ):
+            return t
+    return candidates[0][1]
 
 
 # ---------------------------------------------------------------------------
@@ -616,3 +659,355 @@ class MetricContext:
                 for fi, k in kps.items()
             }
         return cache[key]
+
+
+# Pass analytics homography helpers
+
+def pitch_layout_reliable(
+    pitch_xy_m: np.ndarray,
+    teams: np.ndarray | None = None,
+    *,
+    config: SoccerPitchConfiguration = PITCH_CONFIG,
+    min_players: int = 8,
+    min_x_spread_m: float = 14.0,
+    min_y_spread_m: float = 10.0,
+    max_center_colony_frac: float = 0.4,
+    center_band_m: float = 9.0,
+    min_team_x_sep_m: float = 12.0,
+) -> bool:
+    """False when homography collapses players onto the halfway line (bad H / early frames)."""
+    if pitch_xy_m is None or len(pitch_xy_m) < min_players:
+        return False
+    xy = np.asarray(pitch_xy_m, dtype=np.float64)
+    if not np.isfinite(xy).all():
+        return False
+    length_m = float(config.length) / 100.0
+    center_x = length_m / 2.0
+    x_spread = float(np.percentile(xy[:, 0], 90) - np.percentile(xy[:, 0], 10))
+    y_spread = float(np.percentile(xy[:, 1], 90) - np.percentile(xy[:, 1], 10))
+    if x_spread < min_x_spread_m or y_spread < min_y_spread_m:
+        return False
+    if (np.abs(xy[:, 0] - center_x) < center_band_m).mean() > max_center_colony_frac:
+        return False
+    if teams is not None and np.any(teams == 0) and np.any(teams == 1):
+        m0 = float(xy[teams == 0, 0].mean())
+        m1 = float(xy[teams == 1, 0].mean())
+        if abs(m0 - m1) < min_team_x_sep_m:
+            return False
+    return True
+
+
+def render_radar(
+    detections: sv.Detections,
+    keypoints: sv.KeyPoints | None,
+    *,
+    config: SoccerPitchConfiguration = PITCH_CONFIG,
+    confidence: float = 0.5,
+    transformer: ViewTransformer | None = None,
+    locked_goal_defenders: tuple[int, int] | None = None,
+    debug_keypoints: bool = False,
+) -> np.ndarray | None:
+    """Minimap: H, team-colored goals, keypoints, player feet.
+
+    Provide ``transformer`` and/or ``keypoints``; when ``transformer`` is omitted it is
+    fit from ``keypoints``.
+    """
+    from analytics.class_ids import (
+        GOALKEEPER_CLASS_ID as ROLE_GOALKEEPER,
+        PLAYER_CLASS_ID as ROLE_PLAYER,
+        TEAM_COLORS,
+        TEAM_LEFT,
+        TEAM_RIGHT,
+    )
+    from analytics.goalkeepers import infer_goal_defenders
+    from analytics.player_motion import draw_goals_on_pitch
+
+    t = transformer
+    if t is None:
+        t = homography_from_keypoints_radar(
+            keypoints, config=config, confidence=confidence
+        )
+    if t is None:
+        return None
+
+    radar = draw_pitch(config=config)
+    outfield_mask = detections.class_id == ROLE_PLAYER
+    gk_mask = detections.class_id == ROLE_GOALKEEPER
+    feet_cm = None
+    teams = None
+    gk_feet_cm = None
+    layout_ok = False
+
+    if outfield_mask.any():
+        outfield = detections[outfield_mask]
+        feet = outfield.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
+        feet_cm = t.transform_points(feet.astype(np.float32))
+        teams = outfield.data.get("team", np.zeros(len(outfield), dtype=int))
+        feet_m = feet_cm / 100.0
+        layout_ok = pitch_layout_reliable(feet_m, teams, config=config)
+
+    if gk_mask.any():
+        gks = detections[gk_mask]
+        gk_feet = gks.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
+        gk_feet_cm = t.transform_points(gk_feet.astype(np.float32))
+
+    has_players = outfield_mask.any() or gk_mask.any()
+    if feet_cm is not None and teams is not None and outfield_mask.any():
+        if locked_goal_defenders is not None:
+            left_team, right_team = locked_goal_defenders
+        elif layout_ok:
+            left_team, right_team = infer_goal_defenders(feet_cm, teams)
+        else:
+            left_team, right_team = TEAM_LEFT, TEAM_RIGHT
+        radar = draw_goals_on_pitch(
+            config,
+            left_defender_team=left_team,
+            right_defender_team=right_team,
+            team_colors=TEAM_COLORS,
+            pitch=radar,
+        )
+    elif not has_players:
+        left_team, right_team = TEAM_LEFT, TEAM_RIGHT
+        radar = draw_goals_on_pitch(
+            config,
+            left_defender_team=left_team,
+            right_defender_team=right_team,
+            team_colors=TEAM_COLORS,
+            pitch=radar,
+        )
+
+    if keypoints is not None and keypoints.xy.shape[0] > 0 and debug_keypoints:
+        radar = draw_radar_pitch_keypoints_debug(
+            radar, keypoints, t, config=config, confidence=confidence
+        )
+
+    if feet_cm is not None and teams is not None and outfield_mask.any():
+        on_pitch = valid_pitch_cm(feet_cm, config, margin_cm=80.0)
+        for team_id, color in enumerate(TEAM_COLORS[:2]):
+            team_mask = (teams == team_id) & on_pitch
+            if not team_mask.any():
+                continue
+            radar = draw_points_on_pitch(
+                config=config,
+                xy=feet_cm[team_mask],
+                face_color=color,
+                edge_color=sv.Color.BLACK,
+                radius=20,
+                pitch=radar,
+            )
+
+    if gk_feet_cm is not None and gk_mask.any():
+        gk_teams = detections[gk_mask].data.get(
+            "team", np.full(int(gk_mask.sum()), -1, dtype=int)
+        )
+        on_pitch = valid_pitch_cm(gk_feet_cm, config, margin_cm=80.0)
+        for team_id, color in enumerate(TEAM_COLORS[:2]):
+            team_mask = (gk_teams == team_id) & on_pitch
+            if not team_mask.any():
+                continue
+            radar = draw_points_on_pitch(
+                config=config,
+                xy=gk_feet_cm[team_mask],
+                face_color=color,
+                edge_color=sv.Color.WHITE,
+                radius=16,
+                pitch=radar,
+            )
+        neutral = on_pitch & ~np.isin(gk_teams, (0, 1))
+        if neutral.any():
+            radar = draw_points_on_pitch(
+                config=config,
+                xy=gk_feet_cm[neutral],
+                face_color=sv.Color.from_hex("#E8E8E8"),
+                edge_color=sv.Color.BLACK,
+                radius=14,
+                pitch=radar,
+            )
+    return radar
+
+
+def pitch_keypoint_confidence(
+    keypoints: sv.KeyPoints, n_vertices: int | None = None
+) -> np.ndarray:
+    """Per-vertex confidence; missing entries are 0."""
+    n = n_vertices or pitch_vertex_count()
+    if keypoints is None or keypoints.xy.shape[0] == 0:
+        return np.zeros(n, dtype=np.float32)
+    xy = keypoints.xy[0]
+    if keypoints.confidence is None:
+        conf = np.ones(len(xy), dtype=np.float32)
+    else:
+        conf = keypoints.confidence[0].astype(np.float32)
+    if len(conf) < n:
+        conf = np.pad(conf, (0, n - len(conf)))
+    return conf[:n]
+
+
+def pitch_cm_to_image(
+    points_cm: np.ndarray, transformer: ViewTransformer | None
+) -> np.ndarray | None:
+    """Map pitch points (cm) back to image pixels via ``H^{-1}`` (homography sanity check)."""
+    if transformer is None or points_cm.size == 0:
+        return None
+    pts = points_cm.reshape(-1, 1, 2).astype(np.float32)
+    try:
+        inv = np.linalg.inv(transformer.m)
+    except np.linalg.LinAlgError:
+        return None
+    return cv2.perspectiveTransform(pts, inv).reshape(-1, 2)
+
+
+def pitch_circle_polygon_cm(
+    center_m: np.ndarray,
+    radius_m: float,
+    *,
+    segments: int = 72,
+) -> np.ndarray:
+    """Sample a ground circle in pitch cm (projects to an ellipse on broadcast view)."""
+    center = np.asarray(center_m, dtype=np.float64).reshape(2) * 100.0
+    r_cm = float(radius_m) * 100.0
+    angles = np.linspace(0.0, 2.0 * np.pi, segments, endpoint=False)
+    return np.column_stack(
+        [center[0] + r_cm * np.cos(angles), center[1] + r_cm * np.sin(angles)]
+    )
+
+
+def pitch_circle_to_image(
+    center_m: np.ndarray,
+    radius_m: float,
+    transformer: ViewTransformer | None,
+    *,
+    segments: int = 72,
+) -> np.ndarray | None:
+    """Project a pitch-space ground circle onto image pixels."""
+    poly_cm = pitch_circle_polygon_cm(center_m, radius_m, segments=segments)
+    img = pitch_cm_to_image(poly_cm, transformer)
+    if img is None:
+        return None
+    return np.round(img).astype(np.int32)
+
+
+def _keypoint_image_valid(x: float, y: float) -> bool:
+    return bool(np.isfinite(x) and np.isfinite(y) and x > 1 and y > 1)
+
+
+def pitch_keypoint_reprojection_errors(
+    xy: np.ndarray,
+    transformer: ViewTransformer,
+    *,
+    n_vertices: int | None = None,
+) -> np.ndarray:
+    """Per-vertex reprojection error (px); ``inf`` when the point is invalid."""
+    n = n_vertices or len(xy)
+    errs = np.full(n, np.inf, dtype=np.float32)
+    valid = (xy[:n, 0] > 1) & (xy[:n, 1] > 1)
+    if not valid.any():
+        return errs
+    src = xy[:n][valid].astype(np.float32)
+    dst = transformer.transform_points(src)
+    try:
+        m_inv = np.linalg.inv(transformer.m)
+    except np.linalg.LinAlgError:
+        return errs
+    reproj = cv2.perspectiveTransform(
+        dst.reshape(-1, 1, 2).astype(np.float32), m_inv
+    ).reshape(-1, 2)
+    errs[valid] = np.linalg.norm(reproj - src, axis=1)
+    return errs
+
+
+def pitch_keypoint_inlier_mask(
+    xy: np.ndarray,
+    conf: np.ndarray,
+    transformer: ViewTransformer | None,
+    *,
+    confidence: float = 0.5,
+    max_reproj_px: float = 8.0,
+) -> np.ndarray:
+    """Confidence + reprojection inliers for display (filters noisy pose detections)."""
+    accept = pitch_keypoint_accept_mask(xy, conf, confidence=confidence)
+    if transformer is None or not accept.any():
+        return accept
+    errs = pitch_keypoint_reprojection_errors(xy, transformer, n_vertices=len(accept))
+    return accept & (errs <= max_reproj_px)
+
+
+def draw_radar_pitch_keypoints_debug(
+    radar: np.ndarray,
+    keypoints: sv.KeyPoints,
+    transformer: ViewTransformer,
+    *,
+    config: SoccerPitchConfiguration = PITCH_CONFIG,
+    confidence: float = 0.5,
+    padding: int = 50,
+    scale: float = 0.1,
+) -> np.ndarray:
+    """Warp all detected pitch keypoints onto the minimap (accepted vs rejected)."""
+    if keypoints.xy.shape[0] == 0:
+        return radar
+    n = pitch_vertex_count(config)
+    xy, conf = align_pitch_keypoints(keypoints, n_vertices=n)
+    accept = pitch_keypoint_inlier_mask(
+        xy, conf, transformer, confidence=confidence, max_reproj_px=8.0
+    )
+
+    def _to_radar_px(cm_xy: np.ndarray) -> tuple[int, int]:
+        return (
+            int(cm_xy[0] * scale) + padding,
+            int(cm_xy[1] * scale) + padding,
+        )
+
+    for start, end in config.edges:
+        i, j = start - 1, end - 1
+        if i >= len(xy) or j >= len(xy):
+            continue
+        if not (
+            _keypoint_image_valid(float(xy[i, 0]), float(xy[i, 1]))
+            and _keypoint_image_valid(float(xy[j, 0]), float(xy[j, 1]))
+            and accept[i]
+            and accept[j]
+        ):
+            continue
+        seg = transformer.transform_points(xy[[i, j]].astype(np.float32))
+        cv2.line(
+            radar,
+            _to_radar_px(seg[0]),
+            _to_radar_px(seg[1]),
+            (90, 90, 110),
+            1,
+            cv2.LINE_AA,
+        )
+
+    for i in range(min(len(xy), n)):
+        x, y = float(xy[i, 0]), float(xy[i, 1])
+        if not _keypoint_image_valid(x, y):
+            continue
+        kp_cm = transformer.transform_points(np.array([[x, y]], dtype=np.float32))
+        if accept[i]:
+            face = sv.Color.from_hex("#50DC32")
+            radius = 14
+        else:
+            face = sv.Color.from_hex("#5050FF")
+            radius = 10
+        radar = draw_points_on_pitch(
+            config=config,
+            xy=kp_cm,
+            face_color=face,
+            edge_color=sv.Color.WHITE,
+            radius=radius,
+            pitch=radar,
+        )
+    # Legend (radar coords)
+    lx, ly = padding + 8, padding + 18
+    cv2.putText(
+        radar, "kp", (lx, ly), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (220, 220, 220), 1, cv2.LINE_AA
+    )
+    cv2.circle(radar, (lx + 28, ly - 4), 5, (50, 220, 80), -1, cv2.LINE_AA)
+    cv2.putText(
+        radar, "in", (lx + 38, ly), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (200, 200, 200), 1, cv2.LINE_AA
+    )
+    cv2.circle(radar, (lx + 58, ly - 4), 4, (255, 80, 80), -1, cv2.LINE_AA)
+    cv2.putText(
+        radar, "out", (lx + 68, ly), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (200, 200, 200), 1, cv2.LINE_AA
+    )
+    return radar

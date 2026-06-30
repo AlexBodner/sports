@@ -1,3 +1,10 @@
-# Downloaded demo clips and rendered analytics outputs (regenerated locally).
+# Downloaded demo clips, model weights, and rendered analytics outputs (regenerated locally).
 data/*.mp4
+data/*.pt
 data/renders/
+data/renders-v2/
+data/renders-v3/
+data/renders-v3/run_pass_network_v3.*
+.pass_scan_*.log
+.validate_deps/
+.validate_umap/

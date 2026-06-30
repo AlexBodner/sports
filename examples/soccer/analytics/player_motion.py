@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import colorsys
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -29,11 +30,17 @@ except ImportError:
 from analytics.class_ids import (
     BALL_CLASS_ID,
     GOALKEEPER_CLASS_ID,
+    NEUTRAL_COLOR,
     PLAYER_CLASS_ID,
     REFEREE_CLASS_ID,
+    REFEREE_COLOR,
+    TEAM_COLORS,
     TEAM_NONE,
+    TEAM_VIS_PALETTE,
+    team_vis_class_ids,
 )
 from analytics.draw_helpers import draw_text_shadow
+from analytics.geometry import unit
 from analytics.homography import keypoints_from_inference_field, valid_pitch_cm
 from sports.annotators.soccer import draw_pitch, draw_points_on_pitch
 from sports.common.team import TeamClassifier
@@ -508,6 +515,42 @@ def kalman_ground_speed_m_s(
     return float(np.linalg.norm(delta_m)) * float(fps)
 
 
+def carrier_kalman_direction(
+    detections: sv.Detections,
+    carrier_index: int,
+    *,
+    transformer=None,
+    min_speed: float = 0.5,
+) -> np.ndarray | None:
+    """Unit movement direction for the ball carrier from Kalman velocity."""
+    from analytics.passing.pitch_helpers import image_to_pitch_m
+
+    if detections.data is None:
+        return None
+    kf_vx = detections.data.get("kf_vx")
+    kf_vy = detections.data.get("kf_vy")
+    if kf_vx is None or kf_vy is None:
+        return None
+    vx, vy = float(kf_vx[carrier_index]), float(kf_vy[carrier_index])
+    if not np.isfinite(vx) or not np.isfinite(vy):
+        return None
+    speed = float(np.hypot(vx, vy))
+    if speed < min_speed:
+        return None
+    vel_img = np.array([vx, vy], dtype=np.float64)
+    if transformer is None:
+        return unit(vel_img)
+    feet = feet_xy(detections)[carrier_index]
+    p0 = image_to_pitch_m(feet.reshape(1, 2), transformer)
+    p1 = image_to_pitch_m((feet + vel_img).reshape(1, 2), transformer)
+    if p0 is None or p1 is None:
+        return unit(vel_img)
+    delta = p1[0] - p0[0]
+    if float(np.linalg.norm(delta)) < 1e-6:
+        return unit(vel_img)
+    return unit(delta)
+
+
 class KalmanSpeedDisplaySmoother:
     """EMA on displayed ground speed (m/s) per track."""
 
@@ -720,12 +763,22 @@ def fit_team_classifier(
 
 
 # ---------------------------------------------------------------------------
-# Annotation helpers
+# Annotation helpers (supervision ellipses + custom chips / badges)
 # ---------------------------------------------------------------------------
 
-TEAM_COLORS = [sv.Color.from_hex("#FF1493"), sv.Color.from_hex("#00BFFF")]
-REFEREE_COLOR = sv.Color.from_hex("#FFD700")
-NEUTRAL_COLOR = sv.Color.from_hex("#CCCCCC")
+_TEAM_ELLIPSE = sv.EllipseAnnotator(
+    color=TEAM_VIS_PALETTE, color_lookup=sv.ColorLookup.CLASS, thickness=2,
+)
+_REFEREE_ELLIPSE = sv.EllipseAnnotator(color=REFEREE_COLOR, thickness=2)
+_NEUTRAL_GK_ELLIPSE = sv.EllipseAnnotator(color=NEUTRAL_COLOR, thickness=2)
+_TRACK_LABEL = sv.LabelAnnotator(
+    text_position=sv.Position.BOTTOM_CENTER,
+    text_scale=0.45,
+    text_thickness=1,
+    border_radius=4,
+    color=TEAM_VIS_PALETTE,
+    color_lookup=sv.ColorLookup.CLASS,
+)
 
 MS_TO_KMH = 3.6
 
@@ -736,47 +789,116 @@ def _team_color(team: int) -> sv.Color:
     return NEUTRAL_COLOR
 
 
+def _tracker_id_labels(dets: sv.Detections) -> list[str]:
+    n = len(dets)
+    tids = dets.tracker_id if dets.tracker_id is not None else np.full(n, -1, dtype=int)
+    return [f"#{int(tid)}" if int(tid) >= 0 else "" for tid in tids]
+
+
 def draw_team_ellipses(
     frame: np.ndarray,
     detections: sv.Detections,
     *,
     thickness: int = 2,
-    show_ids: bool = True,
-) -> None:
-    """Draw ground-contact ellipses colored by team (optional track-id labels)."""
+    show_ids: bool = False,
+    use_label_annotator: bool = False,
+) -> np.ndarray:
+    """Draw team-colored ground ellipses via supervision ``EllipseAnnotator``.
+
+    ``use_label_annotator=True`` (pass modes) uses ``LabelAnnotator`` at the feet.
+    ``show_ids=True`` with ``use_label_annotator=False`` draws compact ``#id`` chips.
+    """
+    del thickness  # EllipseAnnotator thickness fixed at module annotators
     if len(detections) == 0 or detections.data is None:
-        return
-    teams = detections.data.get("team", np.full(len(detections), TEAM_NONE))
-    tids = detections.tracker_id if detections.tracker_id is not None else np.full(len(detections), -1)
+        return frame
+
+    players = detections[detections.class_id == PLAYER_CLASS_ID]
+    if len(players):
+        pl_teams = players.data.get("team", np.zeros(len(players)))
+        pl_vis = sv.Detections(
+            xyxy=players.xyxy,
+            class_id=team_vis_class_ids(pl_teams),
+            tracker_id=players.tracker_id,
+            data=players.data,
+        )
+        frame = _TEAM_ELLIPSE.annotate(frame, pl_vis)
+        if show_ids:
+            if use_label_annotator:
+                frame = _TRACK_LABEL.annotate(
+                    frame, pl_vis, labels=_tracker_id_labels(players),
+                )
+            else:
+                _draw_team_id_chips(frame, players, pl_teams)
+
+    gks = detections[detections.class_id == GOALKEEPER_CLASS_ID]
+    if len(gks):
+        gk_teams = gks.data.get("team", np.full(len(gks), TEAM_NONE))
+        has_team = np.isin(gk_teams, (0, 1))
+        if has_team.any():
+            gk_colored = gks[has_team]
+            gk_vis = sv.Detections(
+                xyxy=gk_colored.xyxy,
+                class_id=team_vis_class_ids(gk_teams[has_team]),
+                tracker_id=gk_colored.tracker_id,
+                data=gk_colored.data,
+            )
+            frame = _TEAM_ELLIPSE.annotate(frame, gk_vis)
+            if show_ids:
+                if use_label_annotator:
+                    frame = _TRACK_LABEL.annotate(
+                        frame, gk_vis, labels=_tracker_id_labels(gk_colored),
+                    )
+                else:
+                    _draw_team_id_chips(frame, gk_colored, gk_teams[has_team])
+        if (~has_team).any():
+            gk_neutral = gks[~has_team]
+            frame = _NEUTRAL_GK_ELLIPSE.annotate(frame, gk_neutral)
+            if show_ids:
+                if use_label_annotator:
+                    gk_vis = sv.Detections(
+                        xyxy=gk_neutral.xyxy,
+                        class_id=np.zeros(len(gk_neutral), dtype=int),
+                        tracker_id=gk_neutral.tracker_id,
+                        data=gk_neutral.data,
+                    )
+                    frame = _TRACK_LABEL.annotate(
+                        frame, gk_vis, labels=_tracker_id_labels(gk_neutral),
+                    )
+                else:
+                    _draw_team_id_chips(
+                        frame, gk_neutral, np.full(len(gk_neutral), TEAM_NONE),
+                    )
+
+    refs = detections[detections.class_id == REFEREE_CLASS_ID]
+    if len(refs):
+        frame = _REFEREE_ELLIPSE.annotate(frame, refs)
+
+    return frame
+
+
+def _draw_team_id_chips(
+    frame: np.ndarray,
+    detections: sv.Detections,
+    teams: np.ndarray,
+) -> None:
+    """Compact ``#id`` chips above each ellipse (motion-mode style)."""
+    tids = (
+        detections.tracker_id
+        if detections.tracker_id is not None
+        else np.full(len(detections), -1)
+    )
     for i, xyxy in enumerate(detections.xyxy):
-        class_id = int(detections.class_id[i])
+        tid = int(tids[i])
+        if tid < 0:
+            continue
         team = int(teams[i])
-        if class_id == REFEREE_CLASS_ID:
-            color = REFEREE_COLOR
-        else:
-            color = _team_color(team)
-        x1, y1, x2, y2 = xyxy
-        # Match sv.EllipseAnnotator geometry: feet-centered open arc whose semi-axes
-        # are the full box width and 0.35x that width (not half), so the ground ellipse
-        # sits under the player at the expected visible size.
+        color = _team_color(team) if team in (0, 1) else NEUTRAL_COLOR
+        x1, _y1, x2, y2 = xyxy
         width = float(x2 - x1)
         cx = int((x1 + x2) / 2)
         cy = int(y2)
-        rx = max(int(width), 1)
         ry = max(int(0.35 * width), 1)
-        cv2.ellipse(
-            frame,
-            (cx, cy),
-            (rx, ry),
-            0.0, -45, 235,
-            color.as_bgr(),
-            thickness,
-            cv2.LINE_AA,
-        )
-        tid = int(tids[i])
-        if show_ids and tid >= 0:
-            # Clean id chip (shared badge styling) instead of a raw putText number.
-            _draw_chip(frame, f"#{tid}", (cx, cy - ry - 8), team_bgr=color.as_bgr())
+        _draw_chip(frame, f"#{tid}", (cx, cy - ry - 8), team_bgr=color.as_bgr())
 
 
 # ── radial Kalman speed badge ──
@@ -826,6 +948,16 @@ def _draw_text_shadow(
         font=cv2.FONT_HERSHEY_DUPLEX,
         ascii_safe=False,
     )
+
+
+def player_ellipse_geometry(xyxy: np.ndarray) -> tuple[int, int, float, float]:
+    """Match ``sv.EllipseAnnotator``: feet center + axis-aligned semi-axes."""
+    x1, _y1, x2, y2 = xyxy.astype(np.float64)
+    cx = int((x1 + x2) / 2)
+    cy = int(y2)
+    a = float(x2 - x1)
+    b = 0.35 * a
+    return cx, cy, a, b
 
 
 def _chip_box_size(text: str) -> tuple[int, int, int, int]:
@@ -1396,15 +1528,12 @@ def _smooth_xy(xy: np.ndarray, window: int) -> np.ndarray:
     return out
 
 
-from dataclasses import dataclass as _dataclass, field as _field
-
-
-@_dataclass
+@dataclass
 class PlayerTrack:
     track_id: int
-    frames: list[int] = _field(default_factory=list)
-    xy: list[tuple[float, float]] = _field(default_factory=list)
-    box_h: list[float] = _field(default_factory=list)
+    frames: list[int] = field(default_factory=list)
+    xy: list[tuple[float, float]] = field(default_factory=list)
+    box_h: list[float] = field(default_factory=list)
     distance_m: float = 0.0
     cumulative_m: np.ndarray | None = None  # running total aligned with frames
 

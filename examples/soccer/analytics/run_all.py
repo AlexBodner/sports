@@ -1,13 +1,9 @@
-"""analytics/run_all.py — in-process orchestrator for all five analytics renders.
+"""analytics/run_all.py — in-process orchestrator for all analytics renders.
 
 Computes the shared :class:`~analytics.clip_pipeline.ClipAnalysis` ONCE (one BoTSORT pass,
-one team-classifier fit, one set of homography maps, one kinematics integration) and then
-drives each of the five mode renderers in-process, handing them that single analysis. Each
-mode still writes its own output video; only the expensive shared groundwork is reused.
-
-The five renders are DIRECTION, SPEED, DISTANCE, SPEED_AND_DISTANCE (all players) and
-SPEED_AND_DISTANCE (spotlight). BoTSORT runs once for the whole run-all; each renderer reuses
-that shared analysis.
+one team-classifier fit, one set of homography maps, one kinematics integration, one pass
+scan) and then drives each mode renderer in-process. Each mode still writes its own output
+video; only the expensive shared groundwork is reused.
 """
 
 from __future__ import annotations
@@ -17,18 +13,22 @@ import time
 from pathlib import Path
 
 from analytics.clip_pipeline import ClipAnalysis, compute_clip_analysis
-from analytics.direction import run_direction
-from analytics.distance import run_distance
-from analytics.speed_and_distance import run_speed_and_distance
-from analytics.speed import run_speed
+from analytics.modes.direction import run_direction
+from analytics.modes.distance import run_distance
+from analytics.modes.pass_alternatives import run_pass_alternatives
+from analytics.modes.pass_network import run_pass_network
+from analytics.modes.speed_and_distance import run_speed_and_distance
+from analytics.modes.speed import run_speed
 
-# (output suffix, human label) for the five renders, in run order.
+# (output suffix, human label, dispatch key) for renders in run order.
 _RENDER_PLAN = (
-    ("direction", "DIRECTION"),
-    ("speed", "SPEED"),
-    ("distance", "DISTANCE"),
-    ("speed-distance-all", "SPEED_AND_DISTANCE (all players)"),
-    ("speed-distance-single", "SPEED_AND_DISTANCE (spotlight)"),
+    ("direction", "DIRECTION", "direction"),
+    ("speed", "SPEED", "speed"),
+    ("distance", "DISTANCE", "distance"),
+    ("speed-distance-all", "SPEED_AND_DISTANCE (all players)", "speed-distance-all"),
+    ("speed-distance-single", "SPEED_AND_DISTANCE (spotlight)", "speed-distance-single"),
+    ("pass-network", "PASS_NETWORK", "pass-network"),
+    ("pass-alternatives", "PASS_ALTERNATIVES", "pass-alternatives"),
 )
 
 
@@ -62,12 +62,17 @@ def _pick_spotlight_track_id(analysis: ClipAnalysis) -> int | None:
 
 
 def run_all(args) -> list[str]:
-    """Compute the shared analysis once and render all five analytics videos in-process."""
+    """Compute the shared analysis once and render all seven analytics videos in-process."""
     t_start = time.time()
 
     print("── run-all: computing shared ClipAnalysis ─────────")
     analysis = compute_clip_analysis(args, need_homography=True)
-    print(f"Shared analysis ready in {time.time() - t_start:.1f}s.")
+    # Warm pass scan once so PASS_NETWORK / PASS_ALTERNATIVES reuse the same result.
+    n_passes = len(analysis.pass_scan.passes)
+    print(
+        f"Shared analysis ready in {time.time() - t_start:.1f}s "
+        f"(pass scan: {n_passes} passes)."
+    )
 
     base = args.target_video_path
     explicit_spotlight = getattr(args, "track_id", None)
@@ -76,19 +81,26 @@ def run_all(args) -> list[str]:
 
     outputs: list[str] = []
     timings: list[tuple[str, float]] = []
-    for suffix, label in _RENDER_PLAN:
+    for suffix, label, key in _RENDER_PLAN:
         target = _derive_target(base, suffix)
         track_id = spotlight_id if suffix == "speed-distance-single" else None
         t_mode = time.time()
         print(f"── run-all: rendering {label} → {target} ─────────")
-        if suffix == "direction":
-            run_direction(_mode_args(args, target=target), analysis)
-        elif suffix == "speed":
-            run_speed(_mode_args(args, target=target), analysis)
-        elif suffix == "distance":
-            run_distance(_mode_args(args, target=target), analysis)
-        else:  # speed-distance-all / speed-distance-single
-            run_speed_and_distance(_mode_args(args, target=target, track_id=track_id), analysis)
+        mode_args = _mode_args(args, target=target, track_id=track_id)
+        if key == "direction":
+            run_direction(mode_args, analysis)
+        elif key == "speed":
+            run_speed(mode_args, analysis)
+        elif key == "distance":
+            run_distance(mode_args, analysis)
+        elif key.startswith("speed-distance"):
+            run_speed_and_distance(mode_args, analysis)
+        elif key == "pass-network":
+            run_pass_network(mode_args, analysis)
+        elif key == "pass-alternatives":
+            run_pass_alternatives(mode_args, analysis)
+        else:
+            raise ValueError(f"Unknown render key: {key}")
         outputs.append(target)
         timings.append((label, time.time() - t_mode))
 

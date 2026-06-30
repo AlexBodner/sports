@@ -10,6 +10,7 @@ low-level trackers, smoothers, or draw helpers (see ``player_motion``) or mode r
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
@@ -32,6 +33,7 @@ from analytics.homography import (
 )
 from analytics.class_ids import GOALKEEPER_CLASS_ID, PLAYER_CLASS_ID, TEAM_NONE
 from analytics.player_motion import (
+    KalmanVelocitySmoother,
     collect_referee_tracker_ids,
     collect_tracks,
     compute_kinematics,
@@ -43,6 +45,16 @@ from analytics.player_motion import (
     open_video,
     resolve_goalkeepers_team_id,
 )
+from analytics.passing import (
+    PassDetectionConfig,
+    PassQualityScorer,
+    PassWeights,
+    PossessionScanResult,
+    attach_ball,
+    create_ball_detector,
+    scan_possession_events,
+)
+from analytics.modes.pass_alternatives import plan_pass_events
 from analytics.teams import apply_team_lock, relock_detection_teams
 
 DEFAULT_PLAYER_MODEL_ID = "football-players-detection-3zvbc/11"
@@ -94,6 +106,10 @@ class ClipAnalysis:
     _radar_h_by_frame: dict[int, Any] | None = field(default=None, repr=False)
     _locks: dict[str, ClipLocks] = field(default_factory=dict, repr=False)
     _tracks: dict[int, Any] | None = field(default=None, repr=False)
+    _pass_frames: list[tuple[int, sv.Detections]] | None = field(default=None, repr=False)
+    _pass_scorer: PassQualityScorer | None = field(default=None, repr=False)
+    _pass_scan: PossessionScanResult | None = field(default=None, repr=False)
+    _pass_alternative_events: list[Any] | None = field(default=None, repr=False)
 
     # -- homography ----------------------------------------------------------
     @property
@@ -242,6 +258,97 @@ class ClipAnalysis:
         decorated = vel_smoother.smooth_detections(decorated)
         decorated = relock_detection_teams(decorated, locks.team_lock)
         return decorated
+
+    # -- pass analytics ------------------------------------------------------
+    @property
+    def pass_frames(self) -> list[tuple[int, sv.Detections]]:
+        """Goal-distance-decorated tracked frames with ball attached (for pass scan)."""
+        if self._pass_frames is None:
+            self._pass_frames = _build_pass_frames(self)
+        return self._pass_frames
+
+    @property
+    def pass_by_frame(self) -> dict[int, sv.Detections]:
+        """``{frame_idx: detections}`` with ball attached (goal-distance decoration)."""
+        return dict(self.pass_frames)
+
+    @property
+    def pass_scorer(self) -> PassQualityScorer:
+        """Shared :class:`PassQualityScorer` for pass scan and overlay modes."""
+        if self._pass_scorer is None:
+            metric = self.metric
+            self._pass_scorer = PassQualityScorer(
+                transformers=metric.transforms,
+                keypoints_by_frame=metric.keypoints,
+                pitch_confidence=0.9,
+            )
+        return self._pass_scorer
+
+    @property
+    def pass_scan(self) -> PossessionScanResult:
+        """Lazy pass/turnover scan over :attr:`pass_frames`."""
+        if self._pass_scan is None:
+            config = PassDetectionConfig().for_frame_rate(self.fps)
+            self._pass_scan = scan_possession_events(
+                iter(self.pass_frames),
+                scorer=self.pass_scorer,
+                config=config,
+                metric=True,
+                transformers=self.metric.transforms,
+                fps=float(self.fps),
+            )
+        return self._pass_scan
+
+    @property
+    def pass_alternative_events(self) -> list[Any]:
+        """Cinematic freeze-moment pass options (PASS_ALTERNATIVES planning)."""
+        if self._pass_alternative_events is None:
+            metric = self.metric
+            self._pass_alternative_events = plan_pass_events(
+                self.pass_frames,
+                fps=float(self.fps),
+                frame_transforms=metric.transforms,
+                keypoints_by_frame=metric.keypoints,
+                weights=PassWeights.metric(),
+            )
+        return self._pass_alternative_events
+
+
+def _build_pass_frames(analysis: ClipAnalysis) -> list[tuple[int, sv.Detections]]:
+    """Decorate the shared tracking pass and attach per-frame ball detections."""
+    locks = analysis.locks("goal_distance")
+    vel_smoother = KalmanVelocitySmoother(alpha=0.3)
+    ball_detector = create_ball_detector(device=analysis.args.device)
+    tracked_by = analysis.tracked_by_frame()
+
+    cap, _, _, _ = open_video(analysis.source_video_path)
+    out: list[tuple[int, sv.Detections]] = []
+    frame_idx = 0
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame_idx += 1
+            if analysis.max_frames is not None and frame_idx > analysis.max_frames:
+                break
+            tracked = tracked_by.get(frame_idx, sv.Detections.empty())
+            dets = analysis.decorate_replay_frame(
+                frame_idx,
+                tracked,
+                gk_assignment="goal_distance",
+                locks=locks,
+                vel_smoother=vel_smoother,
+            )
+            dets = attach_ball(dets, ball_detector(frame))
+            out.append((frame_idx, dets))
+    finally:
+        cap.release()
+    return out
+
+
+def _clip_stem(source_video_path: str) -> str:
+    return Path(source_video_path).stem
 
 
 def _clone_team_frames(
